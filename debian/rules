@@ -1,0 +1,55 @@
+#!/usr/bin/make -f
+
+# That's needed for DEB_VERSION_UPSTREAM
+-include /usr/share/dpkg/pkg-info.mk
+# That's needed for DEB_HOST_MULTIARCH
+-include /usr/share/dpkg/architecture.mk
+
+export DEB_CFLAGS_MAINT_APPEND = $(shell dpkg-buildflags --get CPPFLAGS)
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# Convenience shortcuts
+MA_DESTDIR ?= debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)
+MA_DEV_DESTDIR ?= debian/libjim-dev/usr/lib/$(DEB_HOST_MULTIARCH)
+
+%:
+	dh $@
+
+# jimsh0.c is removed from source for DFSG reasons, build it from `make-bootstrap-jim`
+autosetup/jimsh0.c: make-bootstrap-jim
+	./$< > $@
+
+override_dh_autoreconf:
+	# Do not run autoreconf, it is not used
+
+override_dh_auto_configure: autosetup/jimsh0.c
+	dh_auto_configure --builddirectory=static/
+	dh_auto_configure -- --shared
+
+override_dh_auto_build:
+	dh_auto_build --builddirectory=static/
+	dh_auto_build
+
+override_dh_auto_test:
+	dh_auto_test --builddirectory=static/
+	dh_auto_test
+
+override_dh_auto_install:
+	dh_auto_install --builddirectory=static/
+	dh_auto_install
+
+override_dh_install:
+	dh_install
+	set -e; rootdir=`pwd` ;\
+	cd ${MA_DESTDIR}; libfile=`ls *.so.*`; cd $${rootdir};\
+	cd ${MA_DEV_DESTDIR}; ln -sf $${libfile} libjim.so
+
+override_dh_missing:
+	dh_missing --list-missing
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -f autosetup/jimsh0.c
+	rm -f libjim.so*
+	rm -f tests/exec.tmp1
+	rm -Rf static/

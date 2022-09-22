@@ -1,0 +1,22 @@
+From: Didier Raboud <odyx@debian.org>
+Date: Sun, 27 Aug 2017 17:19:03 +0200
+Subject: Use footer-style=none in asciidoc call
+
+In the asciidoc call, use the '-a footer-style=none' to export without the footer; as it contains the build timestamp, which makes the build unreproducible
+---
+ Makefile.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile.in b/Makefile.in
+index 67d503c..270d42e 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -177,7 +177,7 @@ install-docs:
+ 
+ Tcl.html: jim_tcl.txt @srcdir@/make-index
+ @if HAVE_ASCIIDOC
+-	@tclsh@ @srcdir@/make-index $> $^ | @ASCIIDOC@ -d manpage - | @SED@ -e '/^<div.*id="footer-text"/,/<\/div>/d' >$@
++	@tclsh@ @srcdir@/make-index $> $^ | @ASCIIDOC@ -d manpage -a footer-style=none - | @SED@ -e '/^<div.*id="footer-text"/,/<\/div>/d' >$@
+ @else
+ 	@echo "asciidoc is not available"; false
+ @endif

@@ -1,0 +1,11 @@
+Document: jimtcl-manual
+Title: Reference manual for the Jim Tcl scripting language
+Author: Steve Bennett
+Abstract: This manual page focuses primarily on the Tcl language. It describes
+ the language syntax and the built-in commands that will be available in any
+ application based on Tcl.
+Section: Programming/JimTcl
+
+Format: HTML
+Index: /usr/share/doc/jimsh/Tcl.html
+Files: /usr/share/doc/jimsh/Tcl.html

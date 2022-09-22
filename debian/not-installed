@@ -1,0 +1,4 @@
+usr/lib/*/jim/tcltest.tcl
+usr/lib/*/jim/README.extensions
+usr/docs/jim/Tcl.html
+usr/bin/build-jim-ext

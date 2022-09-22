@@ -1,0 +1,225 @@
+jimtcl (0.79+dfsg0.1-1+dde) UNRELEASED; urgency=medium
+
+  * update
+
+ -- Debian QA Group <packages@qa.debian.org>  Wed, 27 Jul 2022 09:36:18 +0800
+
+jimtcl (0.79+dfsg0.1-1+dde) unstable; urgency=medium
+
+  * add sw64 porting.
+
+ -- Zhang FeiLong <zhangfeilong@uniontech.com>  Mon, 23 May 2022 17:58:41 +0800
+
+jimtcl (0.79+dfsg0-3) unstable; urgency=medium
+
+  * Orphan package
+
+  * Run wrap-and-sort -baskt
+  * S-V: Update to 4.6.0 without changes needed
+  * Set upstream metadata fields
+  * Add Salsa CI configuration
+
+ -- Didier Raboud <odyx@debian.org>  Fri, 03 Sep 2021 16:22:09 +0200
+
+jimtcl (0.79+dfsg0-2) unstable; urgency=medium
+
+  * Upload to unstable
+
+ -- Didier Raboud <odyx@debian.org>  Mon, 02 Dec 2019 19:45:37 +0100
+
+jimtcl (0.79+dfsg0-1) experimental; urgency=medium
+
+  [ Ondřej Nový ]
+  * d/copyright: Use https protocol in Format field
+  * d/changelog: Remove trailing whitespaces
+
+  [ Didier Raboud ]
+  * Update to new upstream version 0.79
+    - Bump libjim SONAME from 0.77 to 0.79
+    - Rebase patches; drop upstream backports
+    - Re-repack
+  * Migrate to git-debrebase
+  * Bump Standards-Version to 4.4.1 without changes needed
+  * Patch RPATH support out
+  * Upload to experimental for the NEW soname
+
+ -- Didier Raboud <odyx@debian.org>  Thu, 21 Nov 2019 10:38:27 +0100
+
+jimtcl (0.77+dfsg0-3) unstable; urgency=medium
+
+  * Multi-Arch: mark jimsh as foreign and libjim-dev as same
+  * Bump debhelper compat to 11; update autosetup patch to also accept
+    --runstatedir option
+  * Drop explicit B-D on dpkg-dev
+
+ -- Didier Raboud <odyx@debian.org>  Fri, 30 Mar 2018 10:46:04 +0200
+
+jimtcl (0.77+dfsg0-2) unstable; urgency=medium
+
+  * Cleanup d/control thanks to `cme update dpkg-control`
+  * Update Vcs-* for the move to Salsa
+
+ -- Didier Raboud <odyx@debian.org>  Fri, 23 Feb 2018 20:54:12 +0100
+
+jimtcl (0.77+dfsg0-1) unstable; urgency=medium
+
+  * Repack to remove autosetup/jimsh0.c as it is generated from the `N-1`
+    version of jimtcl (Closes: #882722)
+
+  * Cope with jimsh0.c removal from source; build it with make-bootstrap-jim
+  * Bump S-V to 4.1.1 without changes needed
+  * Priority extra is replaced by optional
+  * Use the canonical alioth https VCS-* urls
+  * Update dh_missing usage and {,not-}installed files
+  * Fix gbp.conf typo
+  * Drop debian-specific .gitattributes, for dgit
+
+ -- Didier Raboud <odyx@debian.org>  Tue, 28 Nov 2017 16:59:36 +0100
+
+jimtcl (0.77-2) unstable; urgency=medium
+
+  * Initialize git-dpm for patch management
+  * Backport two upstream patches to fix ports FTBFS:
+    - tests/exec.test: Minor fix for exec-12.1 on hurd (Closes: #873049)
+    - tests/timer.test: Remove timer-6.5 (Closes: #873048)
+
+ -- Didier Raboud <odyx@debian.org>  Sun, 27 Aug 2017 17:19:57 +0200
+
+jimtcl (0.77-1) unstable; urgency=medium
+
+  * New upstream version
+
+  * Refresh patches
+  * Bump Standards-Version to 4.0.1
+  * Bump debhelper compat to 10
+  * Bump libjim SONAME from 0.76 to 0.77
+  * Enable hardening=+all through DEB_BUILD_MAINT_OPTIONS
+  * Add doc-base for the Jim TCL manual
+
+ -- Didier Raboud <odyx@debian.org>  Thu, 10 Aug 2017 11:05:54 -0400
+
+jimtcl (0.76-2) unstable; urgency=medium
+
+  * Add patch to make the documentation building reproducible
+    (drop the footer containing the timestamp in asciidoc)
+  * Add gbp.conf to cope with the new branch layout
+  * Bump Standards-Version to 3.9.7 without changes
+  * Update source url in debian/copyright
+
+ -- Didier Raboud <odyx@debian.org>  Sat, 27 Feb 2016 17:26:53 +0100
+
+jimtcl (0.76-1) unstable; urgency=low
+
+  * Drop all patches that were upstream backports
+  * Bump libjim SONAME from 0.75 to 0.76:
+    - Jim_GetScript got renamed to JimGetScript
+  * Add patch to the autosetup configure script to accept
+    --{enable,disable}-silent-rules
+  * Bump Standards-Version to 3.9.6 without changes needed
+
+ -- Didier Raboud <odyx@debian.org>  Tue, 26 May 2015 18:39:20 +0200
+
+jimtcl (0.75-1) unstable; urgency=medium
+
+  * New upstream 0.75 release
+    - Bump libjim SONAME from 0.74 to 0.75; symbols: +4,-3
+    - Update debian/copyright
+  * Backport upstream patch to respect $TMPDIR; add Jim_MakeTempFile function
+    and symbol
+
+ -- Didier Raboud <odyx@debian.org>  Wed, 06 Aug 2014 16:45:39 +0200
+
+jimtcl (0.74-3) unstable; urgency=medium
+
+  * In autosetup, use config.guess and config.sub from autotools-dev
+    (Closes: #744441)
+
+ -- Didier Raboud <odyx@debian.org>  Mon, 14 Apr 2014 09:01:33 +0200
+
+jimtcl (0.74-2) unstable; urgency=medium
+
+  * Correct version number in 0.74-1 changelog entry
+  * Update debian/copyright for 0.74 (Closes: #738727)
+    - Add missing examples/dns.tcl license from src:tcllib
+    - Correct wrong apache-2.0 mentions; the files have been re-licensed
+      by upstream
+    - Update years
+    Thanks to Thorsten Alteholz
+  * Bump debhelper Build-Depends to 9, drop source lintian override
+
+ -- Didier Raboud <odyx@debian.org>  Wed, 12 Feb 2014 15:48:26 +0100
+
+jimtcl (0.74-1) unstable; urgency=medium
+
+  * New 0.74 upstream release.
+    - Space allocated for exec env may be one byte short
+    - Fix glob with patterns containing spaces
+    - Give libjim.so an soname
+
+  * Update Homepage to cope with BerliOS closing.
+  * Append CPPFLAGS to CFLAGS
+  * Update Copyright-format Format URL
+  * Drop the two backported fixes from upstream
+  * Rename libjim0debian2 to libjim0.74 as upstream gave the library a
+    soname; also update the symbols' list
+  * Rewrite the workarounds to create libjim-dev's .so symlink
+  * Bump Standards-Version to 3.9.5 without changes needed
+
+ -- Didier Raboud <odyx@debian.org>  Mon, 10 Feb 2014 14:12:45 +0100
+
+jimtcl (0.73-3) unstable; urgency=low
+
+  * Build static flavour and ship it in libjim-dev. (Closes: #677966)
+  * Bump Standards-Version to 3.9.3 without changes needed.
+
+ -- Didier Raboud <odyx@debian.org>  Tue, 19 Jun 2012 09:02:28 +0200
+
+jimtcl (0.73-2) unstable; urgency=medium
+
+  * Backport two fixes from upstream's git for bugs affecting usb-modeswitch.
+    - [b5fcd96] Space allocated for exec env may be one byte short
+    - [695c66c] Fix glob with patterns containing spaces
+
+  * Rise urgency to medium as testing's usb-modeswitch is affected.
+
+ -- Didier Raboud <odyx@debian.org>  Mon, 30 Jan 2012 23:21:34 +0100
+
+jimtcl (0.73-1) unstable; urgency=low
+
+  * New 0.73 upstream release.
+    - Delete the nvp extension.
+
+  * Update debian/rules to cope with nvp deletion.
+
+  * Bump SONAME to 0debian2 :
+    - Rename libjim0debian1 to libjim0debian2;
+    - Remove 23 nvp-related symbols;
+    - Add 29 new 0.73 symbols.
+
+ -- Didier Raboud <odyx@debian.org>  Tue, 03 Jan 2012 14:54:03 +0100
+
+jimtcl (0.72-1) unstable; urgency=low
+
+  * Initial release of jimtcl to Debian (Closes: #645898).
+
+  * Start from upstream's packaging, with some refreshing:
+    - Bump debhelper compat to 9, for automated buildflags and multiarch.
+      - Bump Build-Depends version.
+      - Add source.lintian-overrides.
+    - Bump Standards-Version to 3.9.2.
+    - Add Build-Depends on dpkg-dev 1.16.1 to use the makefile snippets.
+    - Push packaging to Debian's Alioth's collab-maint, update VCS-* fields
+      accordingly.
+    - Rename shell package to jimsh.
+    - Add library and -dev packages.
+    - Install the library to multiarch paths.
+    - Enforce a Debian-specific SONAME (0debian1) with debian/rules trickery,
+      also track exported symbols.
+    - Enhance debian/copyright:
+      - refer to BSD-2-clause;
+      - mention files under Apache-2.0;
+      - mention licensing and copyright holders of debian/.
+      - mention licensing and copyright holders of autosetup/.
+    - Add myself as Maintainer.
+
+ -- Didier Raboud <odyx@debian.org>  Wed, 19 Oct 2011 17:11:49 +0200
