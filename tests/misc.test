@@ -288,8 +288,8 @@ test catch-1.6 "catch break" {
 
 test catch-1.7 "catch exit" {
 	# Normally exit would not be caught
-	dict get [info returncodes] [catch -exit {exit 5} result]
-} {exit}
+	list [dict get [info returncodes] [catch -exit {exit 5} result]] $result
+} {exit 5}
 
 test catch-1.8 "catch error has -errorinfo" {
 	set rc [catch {set undefined} msg opts]
@@ -306,7 +306,7 @@ test return-1.1 "return can rethrow an error" {
 	proc b {} { catch {a} msg opts; return {*}$opts $msg }
 	set rc [catch {b} msg opts]
 	list $rc $msg [llength $opts(-errorinfo)]
-} {1 {from a} 6}
+} {1 {from a} 9}
 
 test return-1.2 "error can rethrow an error" {
 	proc a {} { error "from a" }
@@ -527,19 +527,24 @@ test jimobj-1.4 "incr dict sugar" {
 	list $a(3) $a
 } {4 {3 4}}
 
-test jim-badvar-1.1 "invalid variable name" {
+test jim-badvar-1.1 "variable name with embedded null" {
 	set x b\0c
-	catch {set $x 5}
-} 1
+	set $x 5
+} 5
 
-test jim-badvar-1.2 "incr invalid variable name" {
+test jim-badvar-1.2 "incr variable name with embedded null" {
 	set x b\0c
-	catch {incr $x}
-} 1
+	incr $x
+} 6
 
 test lset-1.1 "lset with bad var" {
 	catch {lset badvar 1 x}
 } 1
+
+test lset-1.2 "lset error message" {
+	catch lset msg
+	set msg
+} {wrong # args: should be "lset listVar ?index ...? value"}
 
 test dict-1.1 "dict to string" {
 	set a [dict create abc \\ def \"]

@@ -36,16 +36,34 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <jimautoconf.h>
 #include <SDL.h>
+#if SDL_MAJOR_VERSION == 2
+#include <SDL2_gfxPrimitives.h>
+#ifdef HAVE_PKG_SDL2_TTF
+#include <SDL_ttf.h>
+#endif
+#else
 #include <SDL_gfxPrimitives.h>
+#endif
 
 #include <jim.h>
+#include <jim-subcmd.h>
 
-#define AIO_CMD_LEN 128
+static int jim_sdl_initialised;
 
 typedef struct JimSdlSurface
 {
+#if SDL_MAJOR_VERSION == 2
+    SDL_Window *win;
+    SDL_Renderer *screen;
+    SDL_Texture *texture;
+#ifdef HAVE_PKG_SDL2_TTF
+    TTF_Font *font;
+#endif
+#else
     SDL_Surface *screen;
+#endif
 } JimSdlSurface;
 
 static void JimSdlSetError(Jim_Interp *interp)
@@ -59,174 +77,457 @@ static void JimSdlDelProc(Jim_Interp *interp, void *privData)
 
     JIM_NOTUSED(interp);
 
+#if SDL_MAJOR_VERSION == 2
+    SDL_DestroyRenderer(jss->screen);
+    SDL_DestroyWindow(jss->win);
+#ifdef HAVE_PKG_SDL2_TTF
+    if (jss->font) {
+        TTF_CloseFont(jss->font);
+    }
+#endif
+#else
     SDL_FreeSurface(jss->screen);
+#endif
     Jim_Free(jss);
 }
+
+static int JimSdlGetLongs(Jim_Interp *interp, int argc, Jim_Obj *const *argv, long *dest)
+{
+    while (argc) {
+        jim_wide w;
+        if (Jim_GetWideExpr(interp, *argv, &w) != JIM_OK) {
+            return JIM_ERR;
+        }
+        *dest++ = w;
+        argc--;
+        argv++;
+    }
+    return JIM_OK;
+}
+
+static void JimSdlClear(JimSdlSurface *jss, int r, int g, int b, int alpha)
+{
+#if SDL_MAJOR_VERSION == 2
+    SDL_SetRenderDrawColor(jss->screen, r, g, b, alpha);
+    SDL_RenderClear(jss->screen);
+#else
+    SDL_FillRect(jss->screen, NULL, SDL_MapRGBA(jss->screen->format, r, g, b, alpha));
+#endif
+}
+
+/* Process the event loop, throwing away all events except quit.
+ * On quit, return JIM_EXIT.
+ * If necessary, this can be caught with catch -exit { ... }
+ */
+static int JimSdlPoll(Jim_Interp *interp)
+{
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        if (e.type == SDL_QUIT) {
+            Jim_SetResultInt(interp, 0);
+            return JIM_EXIT;
+        }
+    }
+    return JIM_OK;
+}
+
+static int jim_sdl_subcmd_free(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    Jim_DeleteCommand(interp, argv[0]);
+    return JIM_OK;
+}
+
+/* [sdl flip] - present the current image, clear the new image, poll for events.
+ * Returns JIM_EXIT on quit event
+ */
+static int jim_sdl_subcmd_flip(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+#if SDL_MAJOR_VERSION == 2
+    SDL_RenderPresent(jss->screen);
+#else
+    SDL_Flip(jss->screen);
+#endif
+    JimSdlClear(jss, 0, 0, 0, SDL_ALPHA_OPAQUE);
+
+    return JimSdlPoll(interp);
+}
+
+/* [sdl poll ?script?] - present the current image, poll for events.
+ * Returns JIM_EXIT on quit event or JIM_OK if all events processed.
+ *
+ * If the script is given, evaluates the script on each poll loop until
+ * either quit event is received or the script returns something other than JIM_OK.
+ */
+static int jim_sdl_subcmd_poll(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    int ret = JIM_OK;
+#if SDL_MAJOR_VERSION == 2
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    SDL_RenderPresent(jss->screen);
+#endif
+    while (ret == JIM_OK) {
+        ret = JimSdlPoll(interp);
+        if (ret != JIM_OK || argc != 1) {
+            break;
+        }
+        ret = Jim_EvalObj(interp, argv[0]);
+    }
+    return ret;
+}
+
+static int jim_sdl_subcmd_clear(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long vals[4];
+    if (JimSdlGetLongs(interp, argc, argv, vals) != JIM_OK) {
+        return JIM_ERR;
+    }
+    if (argc == 3) {
+        vals[3] = SDL_ALPHA_OPAQUE;
+    }
+    JimSdlClear(jss, vals[0], vals[1], vals[2], vals[3]);
+    return JIM_OK;
+}
+
+static int jim_sdl_subcmd_pixel(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long vals[6];
+    if (JimSdlGetLongs(interp, argc, argv, vals) != JIM_OK) {
+        return JIM_ERR;
+    }
+    if (argc == 5) {
+        vals[5] = SDL_ALPHA_OPAQUE;
+    }
+    pixelRGBA(jss->screen, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5]);
+    return JIM_OK;
+}
+
+static int jim_sdl_subcmd_circle(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long vals[7];
+    if (JimSdlGetLongs(interp, argc, argv, vals) != JIM_OK) {
+        return JIM_ERR;
+    }
+    if (argc == 6) {
+        vals[6] = SDL_ALPHA_OPAQUE;
+    }
+    circleRGBA(jss->screen, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6]);
+    return JIM_OK;
+}
+
+static int jim_sdl_subcmd_aacircle(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long vals[7];
+    if (JimSdlGetLongs(interp, argc, argv, vals) != JIM_OK) {
+        return JIM_ERR;
+    }
+    if (argc == 6) {
+        vals[6] = SDL_ALPHA_OPAQUE;
+    }
+    aacircleRGBA(jss->screen, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6]);
+    return JIM_OK;
+}
+
+static int jim_sdl_subcmd_fcircle(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long vals[7];
+    if (JimSdlGetLongs(interp, argc, argv, vals) != JIM_OK) {
+        return JIM_ERR;
+    }
+    if (argc == 6) {
+        vals[6] = SDL_ALPHA_OPAQUE;
+    }
+    filledCircleRGBA(jss->screen, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6]);
+    return JIM_OK;
+}
+
+static int jim_sdl_subcmd_rectangle(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long vals[8];
+    if (JimSdlGetLongs(interp, argc, argv, vals) != JIM_OK) {
+        return JIM_ERR;
+    }
+    if (argc == 7) {
+        vals[7] = SDL_ALPHA_OPAQUE;
+    }
+    rectangleRGBA(jss->screen, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7]);
+    return JIM_OK;
+}
+
+static int jim_sdl_subcmd_box(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long vals[8];
+    if (JimSdlGetLongs(interp, argc, argv, vals) != JIM_OK) {
+        return JIM_ERR;
+    }
+    if (argc == 7) {
+        vals[7] = SDL_ALPHA_OPAQUE;
+    }
+    boxRGBA(jss->screen, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7]);
+    return JIM_OK;
+}
+
+static int jim_sdl_subcmd_line(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long vals[8];
+    if (JimSdlGetLongs(interp, argc, argv, vals) != JIM_OK) {
+        return JIM_ERR;
+    }
+    if (argc == 7) {
+        vals[7] = SDL_ALPHA_OPAQUE;
+    }
+    lineRGBA(jss->screen, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7]);
+    return JIM_OK;
+}
+
+static int jim_sdl_subcmd_aaline(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long vals[8];
+    if (JimSdlGetLongs(interp, argc, argv, vals) != JIM_OK) {
+        return JIM_ERR;
+    }
+    if (argc == 7) {
+        vals[7] = SDL_ALPHA_OPAQUE;
+    }
+    aalineRGBA(jss->screen, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7]);
+    return JIM_OK;
+}
+
+#ifdef HAVE_PKG_SDL2_TTF
+static int jim_sdl_subcmd_font(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long size;
+
+    if (Jim_GetLong(interp, argv[1], &size) != JIM_OK) {
+        return JIM_ERR;
+    }
+    if (jss->font) {
+        TTF_CloseFont(jss->font);
+    }
+    else {
+        TTF_Init();
+    }
+    jss->font = TTF_OpenFont(Jim_String(argv[0]), size);
+    if (jss->font == NULL) {
+        Jim_SetResultFormatted(interp, "Failed to load font %#s", argv[0]);
+        return JIM_ERR;
+    }
+    TTF_SetFontHinting(jss->font, TTF_HINTING_LIGHT);
+    return JIM_OK;
+}
+
+static int jim_sdl_subcmd_text(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    JimSdlSurface *jss = Jim_CmdPrivData(interp);
+    long vals[6];
+    SDL_Surface *surface;
+    SDL_Texture *texture;
+    SDL_Rect rect;
+    SDL_Color col;
+
+    if (!jss->font) {
+        Jim_SetResultString(interp, "No font loaded", -1);
+        return JIM_ERR;
+    }
+
+    if (JimSdlGetLongs(interp, argc - 1, argv + 1, vals) != JIM_OK) {
+        return JIM_ERR;
+    }
+    col.r = vals[2];
+    col.g = vals[3];
+    col.b = vals[4];
+    col.a = (argc == 7) ? vals[5] : SDL_ALPHA_OPAQUE;
+#ifdef JIM_UTF8
+    surface = TTF_RenderUTF8_Blended(jss->font, Jim_String(argv[0]), col);
+#else
+    surface = TTF_RenderText_Blended(jss->font, Jim_String(argv[0]), col);
+#endif
+    texture = SDL_CreateTextureFromSurface(jss->screen, surface);
+    rect.x = vals[0];
+    rect.y = vals[1];
+    rect.w = surface->w;
+    rect.h = surface->h;
+    SDL_RenderCopy(jss->screen, texture, NULL, &rect);
+    SDL_DestroyTexture(texture);
+    SDL_FreeSurface(surface);
+    return JIM_OK;
+}
+#endif
+
+static const jim_subcmd_type sdl_command_table[] = {
+    {   "free",
+        NULL,
+        jim_sdl_subcmd_free,
+        0,
+        0,
+        JIM_MODFLAG_FULLARGV,
+    },
+    {   "flip",
+        NULL,
+        jim_sdl_subcmd_flip,
+        0,
+        0,
+    },
+    {   "poll",
+        "?script?",
+        jim_sdl_subcmd_poll,
+        0,
+        1,
+    },
+    {   "clear",
+        "red green blue ?alpha?",
+        jim_sdl_subcmd_clear,
+        3,
+        4,
+    },
+    {   "pixel",
+        "x y red green blue ?alpha?",
+        jim_sdl_subcmd_pixel,
+        5,
+        6,
+    },
+    {   "circle",
+        "x y radius red green blue ?alpha?",
+        jim_sdl_subcmd_circle,
+        6,
+        7,
+    },
+    {   "aacircle",
+        "x y radius red green blue ?alpha?",
+        jim_sdl_subcmd_aacircle,
+        6,
+        7,
+    },
+    {   "fcircle",
+        "x y radius red green blue ?alpha?",
+        jim_sdl_subcmd_fcircle,
+        6,
+        7,
+    },
+    {   "rectangle",
+        "x1 y1 x2 y2 red green blue ?alpha?",
+        jim_sdl_subcmd_rectangle,
+        7,
+        8,
+    },
+    {   "box",
+        "x1 y1 x2 y2 red green blue ?alpha?",
+        jim_sdl_subcmd_box,
+        7,
+        8,
+    },
+    {   "line",
+        "x1 y1 x2 y2 red green blue ?alpha?",
+        jim_sdl_subcmd_line,
+        7,
+        8,
+    },
+    {   "aaline",
+        "x1 y1 x2 y2 red green blue ?alpha?",
+        jim_sdl_subcmd_aaline,
+        7,
+        8,
+    },
+#ifdef HAVE_PKG_SDL2_TTF
+    {   "font",
+        "filename.ttf size",
+        jim_sdl_subcmd_font,
+        2,
+        2,
+    },
+    {   "text",
+        "x y string red green blue ?alpha?",
+        jim_sdl_subcmd_text,
+        6,
+        7,
+    },
+#endif
+    { NULL }
+};
 
 /* Calls to commands created via [sdl.surface] are implemented by this
  * C command. */
 static int JimSdlHandlerCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    JimSdlSurface *jss = Jim_CmdPrivData(interp);
-    int option;
-    static const char * const options[] = {
-        "free", "flip", "pixel", "rectangle", "box", "line", "aaline",
-        "circle", "aacircle", "fcircle", NULL
-    };
-    enum
-    { OPT_FREE, OPT_FLIP, OPT_PIXEL, OPT_RECTANGLE, OPT_BOX, OPT_LINE,
-        OPT_AALINE, OPT_CIRCLE, OPT_AACIRCLE, OPT_FCIRCLE
-    };
+    const jim_subcmd_type *ct = Jim_ParseSubCmd(interp, sdl_command_table, argc, argv);
 
-    if (argc < 2) {
-        Jim_WrongNumArgs(interp, 1, argv, "method ?args ...?");
-        return JIM_ERR;
-    }
-    if (Jim_GetEnum(interp, argv[1], options, &option, "SDL surface method", JIM_ERRMSG) != JIM_OK)
-        return JIM_ERR;
-    if (option == OPT_PIXEL) {
-        /* PIXEL */
-        long x, y, red, green, blue, alpha = 255;
-
-        if (argc != 7 && argc != 8) {
-            Jim_WrongNumArgs(interp, 2, argv, "x y red green blue ?alpha?");
-            return JIM_ERR;
-        }
-        if (Jim_GetLong(interp, argv[2], &x) != JIM_OK ||
-            Jim_GetLong(interp, argv[3], &y) != JIM_OK ||
-            Jim_GetLong(interp, argv[4], &red) != JIM_OK ||
-            Jim_GetLong(interp, argv[5], &green) != JIM_OK ||
-            Jim_GetLong(interp, argv[6], &blue) != JIM_OK) {
-            return JIM_ERR;
-        }
-        if (argc == 8 && Jim_GetLong(interp, argv[7], &alpha) != JIM_OK)
-            return JIM_ERR;
-        pixelRGBA(jss->screen, x, y, red, green, blue, alpha);
-        return JIM_OK;
-    }
-    else if (option == OPT_RECTANGLE || option == OPT_BOX ||
-        option == OPT_LINE || option == OPT_AALINE) {
-        /* RECTANGLE, BOX, LINE, AALINE */
-        long x1, y1, x2, y2, red, green, blue, alpha = 255;
-
-        if (argc != 9 && argc != 10) {
-            Jim_WrongNumArgs(interp, 2, argv, "x y red green blue ?alpha?");
-            return JIM_ERR;
-        }
-        if (Jim_GetLong(interp, argv[2], &x1) != JIM_OK ||
-            Jim_GetLong(interp, argv[3], &y1) != JIM_OK ||
-            Jim_GetLong(interp, argv[4], &x2) != JIM_OK ||
-            Jim_GetLong(interp, argv[5], &y2) != JIM_OK ||
-            Jim_GetLong(interp, argv[6], &red) != JIM_OK ||
-            Jim_GetLong(interp, argv[7], &green) != JIM_OK ||
-            Jim_GetLong(interp, argv[8], &blue) != JIM_OK) {
-            return JIM_ERR;
-        }
-        if (argc == 10 && Jim_GetLong(interp, argv[9], &alpha) != JIM_OK)
-            return JIM_ERR;
-        switch (option) {
-            case OPT_RECTANGLE:
-                rectangleRGBA(jss->screen, x1, y1, x2, y2, red, green, blue, alpha);
-                break;
-            case OPT_BOX:
-                boxRGBA(jss->screen, x1, y1, x2, y2, red, green, blue, alpha);
-                break;
-            case OPT_LINE:
-                lineRGBA(jss->screen, x1, y1, x2, y2, red, green, blue, alpha);
-                break;
-            case OPT_AALINE:
-                aalineRGBA(jss->screen, x1, y1, x2, y2, red, green, blue, alpha);
-                break;
-        }
-        return JIM_OK;
-    }
-    else if (option == OPT_CIRCLE || option == OPT_AACIRCLE || option == OPT_FCIRCLE) {
-        /* CIRCLE, AACIRCLE, FCIRCLE */
-        long x, y, radius, red, green, blue, alpha = 255;
-
-        if (argc != 8 && argc != 9) {
-            Jim_WrongNumArgs(interp, 2, argv, "x y radius red green blue ?alpha?");
-            return JIM_ERR;
-        }
-        if (Jim_GetLong(interp, argv[2], &x) != JIM_OK ||
-            Jim_GetLong(interp, argv[3], &y) != JIM_OK ||
-            Jim_GetLong(interp, argv[4], &radius) != JIM_OK ||
-            Jim_GetLong(interp, argv[5], &red) != JIM_OK ||
-            Jim_GetLong(interp, argv[6], &green) != JIM_OK ||
-            Jim_GetLong(interp, argv[7], &blue) != JIM_OK) {
-            return JIM_ERR;
-        }
-        if (argc == 9 && Jim_GetLong(interp, argv[8], &alpha) != JIM_OK)
-            return JIM_ERR;
-        switch (option) {
-            case OPT_CIRCLE:
-                circleRGBA(jss->screen, x, y, radius, red, green, blue, alpha);
-                break;
-            case OPT_AACIRCLE:
-                aacircleRGBA(jss->screen, x, y, radius, red, green, blue, alpha);
-                break;
-            case OPT_FCIRCLE:
-                filledCircleRGBA(jss->screen, x, y, radius, red, green, blue, alpha);
-                break;
-        }
-        return JIM_OK;
-    }
-    else if (option == OPT_FREE) {
-        /* FREE */
-        if (argc != 2) {
-            Jim_WrongNumArgs(interp, 2, argv, "");
-            return JIM_ERR;
-        }
-        Jim_DeleteCommand(interp, Jim_String(argv[0]));
-        return JIM_OK;
-    }
-    else if (option == OPT_FLIP) {
-        /* FLIP */
-        if (argc != 2) {
-            Jim_WrongNumArgs(interp, 2, argv, "");
-            return JIM_ERR;
-        }
-        SDL_Flip(jss->screen);
-        return JIM_OK;
-    }
-    return JIM_OK;
+    return Jim_CallSubCmd(interp, ct, argc, argv);
 }
 
 static int JimSdlSurfaceCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
     JimSdlSurface *jss;
-    char buf[AIO_CMD_LEN];
-    Jim_Obj *objPtr;
-    long screenId, xres, yres;
-    SDL_Surface *screen;
+    char buf[128];
+    long vals[2];
+    const char *title;
 
-    if (argc != 3) {
-        Jim_WrongNumArgs(interp, 1, argv, "xres yres");
+    if (argc != 3 && argc != 4) {
+        Jim_WrongNumArgs(interp, 1, argv, "xres yres ?title?");
         return JIM_ERR;
     }
-    if (Jim_GetLong(interp, argv[1], &xres) != JIM_OK ||
-        Jim_GetLong(interp, argv[2], &yres) != JIM_OK)
-        return JIM_ERR;
 
-    /* Try to create the surface */
-    screen = SDL_SetVideoMode(xres, yres, 32, SDL_SWSURFACE | SDL_ANYFORMAT);
-    if (screen == NULL) {
-        JimSdlSetError(interp);
+    if (JimSdlGetLongs(interp, 2, argv + 1, vals) != JIM_OK) {
         return JIM_ERR;
     }
-    /* Get the next file id */
-    if (Jim_EvalGlobal(interp, "if {[catch {incr sdl.surfaceId}]} {set sdl.surfaceId 0}") != JIM_OK)
-        return JIM_ERR;
-    objPtr = Jim_GetVariableStr(interp, "sdl.surfaceId", JIM_ERRMSG);
-    if (objPtr == NULL)
-        return JIM_ERR;
-    if (Jim_GetLong(interp, objPtr, &screenId) != JIM_OK)
-        return JIM_ERR;
 
-    /* Create the SDL screen command */
+    if (!jim_sdl_initialised) {
+        jim_sdl_initialised++;
+        if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+            JimSdlSetError(interp);
+            return JIM_ERR;
+        }
+#if SDL_MAJOR_VERSION == 2
+        SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+#endif
+        atexit(SDL_Quit);
+    }
+
+    title = (argc == 4) ? Jim_String(argv[3]) : "sdl";
+
     jss = Jim_Alloc(sizeof(*jss));
-    jss->screen = screen;
-    sprintf(buf, "sdl.surface%ld", screenId);
+    memset(jss, 0, sizeof(*jss));
+
+#if SDL_MAJOR_VERSION == 2
+    /* Try to create the surface */
+    jss->win = SDL_CreateWindow(title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, vals[0], vals[1], 0);
+    if (jss->win) {
+        jss->screen = SDL_CreateRenderer(jss->win, -1, SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_ACCELERATED);
+        if (jss->screen) {
+            /* Need an initial SDL_PollEvent() to make the window display */
+            SDL_PollEvent(NULL);
+        }
+        else {
+            SDL_DestroyWindow(jss->win);
+        }
+    }
+#else
+    jss->screen = SDL_SetVideoMode(vals[0], vals[1], 32, SDL_SWSURFACE | SDL_ANYFORMAT);
+    if (jss->screen) {
+        SDL_WM_SetCaption(title, title);
+    }
+#endif
+    if (jss->screen) {
+        JimSdlClear(jss, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    }
+    else {
+        JimSdlSetError(interp);
+        Jim_Free(jss);
+        return JIM_ERR;
+    }
+
+    /* Create the SDL command */
+    snprintf(buf, sizeof(buf), "sdl.surface%ld", Jim_GetId(interp));
     Jim_CreateCommand(interp, buf, JimSdlHandlerCommand, jss, JimSdlDelProc);
     Jim_SetResult(interp, Jim_MakeGlobalNamespaceName(interp, Jim_NewStringObj(interp, buf, -1)));
     return JIM_OK;
@@ -234,14 +535,7 @@ static int JimSdlSurfaceCommand(Jim_Interp *interp, int argc, Jim_Obj *const *ar
 
 int Jim_sdlInit(Jim_Interp *interp)
 {
-    if (Jim_PackageProvide(interp, "sdl", "1.0", JIM_ERRMSG))
-        return JIM_ERR;
-
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        JimSdlSetError(interp);
-        return JIM_ERR;
-    }
-    atexit(SDL_Quit);
+    Jim_PackageProvideCheck(interp, "sdl");
     Jim_CreateCommand(interp, "sdl.screen", JimSdlSurfaceCommand, NULL, NULL);
     return JIM_OK;
 }

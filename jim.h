@@ -125,6 +125,9 @@ extern "C" {
  * Exported defines
  * ---------------------------------------------------------------------------*/
 
+/* Increment this every time the public ABI changes */
+#define JIM_ABI_VERSION 101
+
 #define JIM_OK 0
 #define JIM_ERR 1
 #define JIM_RETURN 2
@@ -133,7 +136,7 @@ extern "C" {
 #define JIM_SIGNAL 5
 #define JIM_EXIT 6
 /* The following are internal codes and should never been seen/used */
-#define JIM_EVAL 7
+#define JIM_EVAL 7      /* tailcall */
 
 #define JIM_MAX_CALLFRAME_DEPTH 1000 /* default max nesting depth for procs */
 #define JIM_MAX_EVAL_DEPTH 2000 /* default max nesting depth for eval */
@@ -151,6 +154,7 @@ extern "C" {
 #define JIM_ENUM_ABBREV 2       /* Jim_GetEnum() - Allow unambiguous abbreviation */
 #define JIM_UNSHARED 4          /* Jim_GetVariable() - return unshared object */
 #define JIM_MUSTEXIST 8         /* Jim_SetDictKeysVector() - fail if non-existent */
+#define JIM_NORESULT 16         /* Jim_SetDictKeysVector() - don't store the result in the interp result */
 
 /* Flags for Jim_SubstObj() */
 #define JIM_SUBST_NOVAR 1 /* don't perform variables substitutions */
@@ -161,6 +165,7 @@ extern "C" {
 /* Flags used by API calls getting a 'nocase' argument. */
 #define JIM_CASESENS    0   /* case sensitive */
 #define JIM_NOCASE      1   /* no case */
+#define JIM_OPT_END     2   /* if implemented by a command (e.g. regexp), add -- to the argument list */
 
 /* Filesystem related */
 #define JIM_PATH_LEN 1024
@@ -235,6 +240,8 @@ typedef struct Jim_HashTableIterator {
         (entry)->u.val = (_val_); \
 } while(0)
 
+#define Jim_SetHashIntVal(ht, entry, _val_) (entry)->u.intval = (_val_)
+
 #define Jim_FreeEntryKey(ht, entry) \
     if ((ht)->type->keyDestructor) \
         (ht)->type->keyDestructor((ht)->privdata, (entry)->key)
@@ -255,6 +262,7 @@ typedef struct Jim_HashTableIterator {
 
 #define Jim_GetHashEntryKey(he) ((he)->key)
 #define Jim_GetHashEntryVal(he) ((he)->u.val)
+#define Jim_GetHashEntryIntVal(he) ((he)->u.intval)
 #define Jim_GetHashTableCollisions(ht) ((ht)->collisions)
 #define Jim_GetHashTableSize(ht) ((ht)->size)
 #define Jim_GetHashTableUsed(ht) ((ht)->used)
@@ -317,6 +325,8 @@ typedef struct Jim_Obj {
             int len;        /* Length */
             int maxLen;        /* Allocated 'ele' length */
         } listValue;
+        /* dict object */
+        struct Jim_Dict *dictValue;
         /* String type */
         struct {
             int maxLength;
@@ -437,6 +447,18 @@ typedef struct Jim_CallFrame {
     struct Jim_Cmd *tailcallCmd;  /* Resolved command for pending tailcall invocation */
 } Jim_CallFrame;
 
+/* Evaluation frame */
+typedef struct Jim_EvalFrame {
+    const char *type;           /* "cmd", "source", etc. */
+    int level; /* Level of this evaluation frame. 0 = global */
+    int callFrameLevel;         /* corresponding call frame level */
+    struct Jim_Cmd *cmd;        /* The currently executing command */
+    struct Jim_EvalFrame *parent; /* The parent frame or NULL if at top */
+    Jim_Obj *const *argv; /* object vector of the current command . */
+    int argc; /* number of args */
+    Jim_Obj *scriptObj;
+} Jim_EvalFrame;
+
 /* The var structure. It just holds the pointer of the referenced
  * object. If linkFramePtr is not NULL the variable is a link
  * to a variable of name stored in objPtr living in the given callframe
@@ -454,7 +476,23 @@ typedef int Jim_CmdProc(struct Jim_Interp *interp, int argc,
     Jim_Obj *const *argv);
 typedef void Jim_DelCmdProc(struct Jim_Interp *interp, void *privData);
 
-
+/* The dict structure. It uses the same approach as Python OrderedDict
+ * of storing a hash table of table offsets into a table containing keys and objects.
+ * This preserves order when adding and replacing elements.
+ */
+typedef struct Jim_Dict {
+    struct JimDictHashEntry {
+        int offset;
+        unsigned hash;
+    } *ht;		        /* Allocated hash table of size 'size' */
+    unsigned int size;          /* Size of the hash table (0 or power of two) */
+    unsigned int sizemask;      /* mask to apply to hash to index into offsets table */
+    unsigned int uniq;          /* unique value to add to hash generator */
+    Jim_Obj **table;            /* Table of alternating key, value elements */
+    int len;                    /* Number of used elements in table */
+    int maxLen;                 /* Allocated length of table */
+    unsigned int dummy;         /* Number of dummy entries */
+} Jim_Dict;
 
 /* A command is implemented in C if isproc is 0, otherwise
  * it is a Tcl procedure with the arglist and body represented by the
@@ -463,6 +501,7 @@ typedef struct Jim_Cmd {
     int inUse;           /* Reference count */
     int isproc;          /* Is this a procedure? */
     struct Jim_Cmd *prevCmd;    /* Previous command defn if cmd created 'local' */
+    Jim_Obj *cmdNameObj;       /* The fully resolved command name - just a pointer, not a reference */
     union {
         struct {
             /* native (C) command */
@@ -525,9 +564,15 @@ typedef struct Jim_Interp {
                 'ID' field contained in the Jim_CallFrame
                 structure. */
     int local; /* If 'local' is in effect, newly defined procs keep a reference to the old defn */
+    int quitting; /* Set to 1 during Jim_FreeInterp() */
+    int safeexpr; /* Set when evaluating a "safe" expression, no var subst or command eval */
     Jim_Obj *liveList; /* Linked list of all the live objects. */
     Jim_Obj *freeList; /* Linked list of all the unused objects. */
     Jim_Obj *currentScriptObj; /* Script currently in execution. */
+    Jim_EvalFrame topEvalFrame;  /* dummy top evaluation frame */
+    Jim_EvalFrame *evalFrame;  /* evaluation stack */
+    int argc;
+    Jim_Obj * const *argv;
     Jim_Obj *nullScriptObj; /* script representation of an empty string */
     Jim_Obj *emptyObj; /* Shared empty string object. */
     Jim_Obj *trueObj; /* Shared true int object. */
@@ -539,16 +584,20 @@ typedef struct Jim_Interp {
                 is running as sentinel to avoid to recursive
                 calls via the [collect] command inside
                 finalizers. */
-    time_t lastCollectTime; /* unix time of the last GC execution */
+    jim_wide lastCollectTime; /* unix time of the last GC execution */
     Jim_Obj *stackTrace; /* Stack trace object. */
     Jim_Obj *errorProc; /* Name of last procedure which returned an error */
     Jim_Obj *unknown; /* Unknown command cache */
+    Jim_Obj *defer; /* "jim::defer" */
+    Jim_Obj *traceCmdObj; /* If non-null, execution trace command to invoke */
     int unknown_called; /* The unknown command has been invoked */
     int errorFlag; /* Set if an error occurred during execution. */
     void *cmdPrivData; /* Used to pass the private data pointer to
                   a command. It is set to what the user specified
                   via Jim_CreateCommand(). */
 
+    Jim_Cmd *oldCmdCache; /* commands that have been deleted, but may still be cached */
+    int oldCmdCacheSize; /* Number of delete commands */
     struct Jim_CallFrame *freeFramesList; /* list of CallFrame structures. */
     struct Jim_HashTable assocData; /* per-interp storage for use by packages */
     Jim_PrngState *prngState; /* per interpreter Random Number Gen. state. */
@@ -560,7 +609,6 @@ typedef struct Jim_Interp {
  * At some point may be a real function doing more work.
  * The proc epoch is used in order to know when a command lookup
  * cached can no longer considered valid. */
-#define Jim_InterpIncrProcEpoch(i) (i)->procEpoch++
 #define Jim_SetResultString(i,s,l) Jim_SetResult(i, Jim_NewStringObj(i,s,l))
 #define Jim_SetResultInt(i,intval) Jim_SetResult(i, Jim_NewIntObj(i,intval))
 /* Note: Using trueObj and falseObj here makes some things slower...*/
@@ -597,12 +645,20 @@ typedef struct Jim_Reference {
 #define Jim_NewEmptyStringObj(i) Jim_NewStringObj(i, "", 0)
 #define Jim_FreeHashTableIterator(iter) Jim_Free(iter)
 
-#define JIM_EXPORT
+#define JIM_EXPORT extern
 
 /* Memory allocation */
-JIM_EXPORT void *Jim_Alloc (int size);
-JIM_EXPORT void *Jim_Realloc(void *ptr, int size);
-JIM_EXPORT void Jim_Free (void *ptr);
+
+/* The default Jim Allocator can be replaced by assigning to Jim_Allocator.
+ * This function does malloc/realloc/free depending on the arguments.
+ * If size is 0, ptr is freed.
+ * Otherwise malloc or realloc is done depending on whether ptr is NULL.
+ */
+JIM_EXPORT void *(*Jim_Allocator)(void *ptr, size_t size);
+
+#define Jim_Free(P) Jim_Allocator((P), 0)
+#define Jim_Realloc(P, S) Jim_Allocator((P), (S))
+#define Jim_Alloc(S) Jim_Allocator(NULL, (S))
 JIM_EXPORT char * Jim_StrDup (const char *s);
 JIM_EXPORT char *Jim_StrDupLen(const char *s, int l);
 
@@ -610,6 +666,16 @@ JIM_EXPORT char *Jim_StrDupLen(const char *s, int l);
 JIM_EXPORT char **Jim_GetEnviron(void);
 JIM_EXPORT void Jim_SetEnviron(char **env);
 JIM_EXPORT int Jim_MakeTempFile(Jim_Interp *interp, const char *filename_template, int unlink_file);
+#ifndef CLOCK_REALTIME
+#  define CLOCK_REALTIME 0
+#endif
+#ifndef CLOCK_MONOTONIC
+#  define CLOCK_MONOTONIC 1
+#endif
+#ifndef CLOCK_MONOTONIC_RAW
+#  define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
+#endif
+JIM_EXPORT jim_wide Jim_GetTimeUsec(unsigned type);
 
 /* evaluation */
 JIM_EXPORT int Jim_Eval(Jim_Interp *interp, const char *script);
@@ -699,8 +765,6 @@ JIM_EXPORT int Jim_CompareStringImmediate (Jim_Interp *interp,
         Jim_Obj *objPtr, const char *str);
 JIM_EXPORT int Jim_StringCompareObj(Jim_Interp *interp, Jim_Obj *firstObjPtr,
         Jim_Obj *secondObjPtr, int nocase);
-JIM_EXPORT int Jim_StringCompareLenObj(Jim_Interp *interp, Jim_Obj *firstObjPtr,
-        Jim_Obj *secondObjPtr, int nocase);
 JIM_EXPORT int Jim_Utf8Length(Jim_Interp *interp, Jim_Obj *objPtr);
 
 /* reference object */
@@ -724,9 +788,9 @@ JIM_EXPORT int Jim_CreateCommand (Jim_Interp *interp,
         const char *cmdName, Jim_CmdProc *cmdProc, void *privData,
          Jim_DelCmdProc *delProc);
 JIM_EXPORT int Jim_DeleteCommand (Jim_Interp *interp,
-        const char *cmdName);
+        Jim_Obj *cmdNameObj);
 JIM_EXPORT int Jim_RenameCommand (Jim_Interp *interp,
-        const char *oldName, const char *newName);
+        Jim_Obj *oldNameObj, Jim_Obj *newNameObj);
 JIM_EXPORT Jim_Cmd * Jim_GetCommand (Jim_Interp *interp,
         Jim_Obj *objPtr, int flags);
 JIM_EXPORT int Jim_SetVariable (Jim_Interp *interp,
@@ -797,8 +861,8 @@ JIM_EXPORT int Jim_DictKeysVector (Jim_Interp *interp,
 JIM_EXPORT int Jim_SetDictKeysVector (Jim_Interp *interp,
         Jim_Obj *varNamePtr, Jim_Obj *const *keyv, int keyc,
         Jim_Obj *newObjPtr, int flags);
-JIM_EXPORT int Jim_DictPairs(Jim_Interp *interp,
-        Jim_Obj *dictPtr, Jim_Obj ***objPtrPtr, int *len);
+JIM_EXPORT Jim_Obj **Jim_DictPairs(Jim_Interp *interp,
+        Jim_Obj *dictPtr, int *len);
 JIM_EXPORT int Jim_DictAddElement(Jim_Interp *interp, Jim_Obj *objPtr,
         Jim_Obj *keyObjPtr, Jim_Obj *valueObjPtr);
 
@@ -826,6 +890,8 @@ JIM_EXPORT int Jim_GetBoolean(Jim_Interp *interp, Jim_Obj *objPtr,
 
 /* integer object */
 JIM_EXPORT int Jim_GetWide (Jim_Interp *interp, Jim_Obj *objPtr,
+        jim_wide *widePtr);
+JIM_EXPORT int Jim_GetWideExpr(Jim_Interp *interp, Jim_Obj *objPtr,
         jim_wide *widePtr);
 JIM_EXPORT int Jim_GetLong (Jim_Interp *interp, Jim_Obj *objPtr,
         long *longPtr);
@@ -865,13 +931,18 @@ JIM_EXPORT void * Jim_GetAssocData(Jim_Interp *interp, const char *key);
 JIM_EXPORT int Jim_SetAssocData(Jim_Interp *interp, const char *key,
         Jim_InterpDeleteProc *delProc, void *data);
 JIM_EXPORT int Jim_DeleteAssocData(Jim_Interp *interp, const char *key);
+JIM_EXPORT int Jim_CheckAbiVersion(Jim_Interp *interp, int abi_version);
 
 /* Packages C API */
+
 /* jim-package.c */
 JIM_EXPORT int Jim_PackageProvide (Jim_Interp *interp,
         const char *name, const char *ver, int flags);
 JIM_EXPORT int Jim_PackageRequire (Jim_Interp *interp,
         const char *name, int flags);
+#define Jim_PackageProvideCheck(INTERP, NAME) \
+        if (Jim_CheckAbiVersion(INTERP, JIM_ABI_VERSION) == JIM_ERR || Jim_PackageProvide(INTERP, NAME, "1.0", JIM_ERRMSG)) \
+                return JIM_ERR
 
 /* error messages */
 JIM_EXPORT void Jim_MakeErrorMessage (Jim_Interp *interp);
@@ -884,6 +955,8 @@ JIM_EXPORT char *Jim_HistoryGetline(Jim_Interp *interp, const char *prompt);
 JIM_EXPORT void Jim_HistorySetCompletion(Jim_Interp *interp, Jim_Obj *commandObj);
 JIM_EXPORT void Jim_HistoryAdd(const char *line);
 JIM_EXPORT void Jim_HistoryShow(void);
+JIM_EXPORT void Jim_HistorySetMaxLen(int length);
+JIM_EXPORT int Jim_HistoryGetMaxLen(void);
 
 /* Misc */
 JIM_EXPORT int Jim_InitStaticExtensions(Jim_Interp *interp);
@@ -895,6 +968,7 @@ JIM_EXPORT int Jim_IsBigEndian(void);
  * in a catch -signal {} clause.
  */
 #define Jim_CheckSignal(i) ((i)->signal_level && (i)->sigmask)
+JIM_EXPORT void Jim_SignalSetIgnored(jim_wide mask);
 
 /* jim-load.c */
 JIM_EXPORT int Jim_LoadLibrary(Jim_Interp *interp, const char *pathName);

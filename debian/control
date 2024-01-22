@@ -1,10 +1,12 @@
 Source: jimtcl
-Maintainer: Debian QA Group <packages@qa.debian.org>
+Maintainer: Bo YU <tsu.yubo@gmail.com>
 Section: devel
 Priority: optional
 Build-Depends:
  asciidoc,
  debhelper-compat (= 13),
+ libssl-dev,
+ pkg-config,
 Standards-Version: 4.6.0
 Vcs-Browser: https://salsa.debian.org/debian/jimtcl
 Vcs-Git: https://salsa.debian.org/debian/jimtcl.git
@@ -31,7 +33,7 @@ Architecture: any
 Multi-Arch: same
 Section: libdevel
 Depends:
- libjim0.79 (= ${binary:Version}),
+ libjim0.82 (= ${binary:Version}),
  ${misc:Depends},
 Description: small-footprint implementation of Tcl - development files
  Jim is an opensource small-footprint implementation of the Tcl programming
@@ -43,7 +45,7 @@ Description: small-footprint implementation of Tcl - development files
  .
  This package provides the libjim development files.
 
-Package: libjim0.79
+Package: libjim0.82
 Architecture: any
 Multi-Arch: same
 Section: libs

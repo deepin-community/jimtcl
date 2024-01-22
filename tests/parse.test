@@ -334,5 +334,42 @@ test parse-1.65 "double backslash in comment" {
 	incr x
 } 2
 
+test parse-1.66 {backslash newline} {
+	proc "abc def" {x} { incr x; return $x }
+	set x ["abc\
+	def" 4]
+} {5}
+
+test parse-1.67 {missing quote in command} -body {
+	set x ["abc\
+	def]
+} -returnCodes error -match regexp -result {missing ("|quote)}
+
+test parse-1.68 {missing quote} -body {
+	set x "abc\
+	line without quote
+
+} -returnCodes error -match regexp -result {missing ("|quote)}
+
+test parse-1.69 {comment with trailing backslash} {
+	set x "#abc \\"
+	eval $x
+} {}
+
+test parse-1.70 {info complete, missing quotes} {
+	set v 1
+	set result {}
+	# missing leading quote is ok
+	foreach p {
+		{"abc}
+		{"abc$v}
+		{abc"}
+		{abc$v"}
+		{"abc$v"}
+	} {
+		lappend result [info complete $p]
+	}
+	set result
+} {0 0 1 1 1}
 
 testreport

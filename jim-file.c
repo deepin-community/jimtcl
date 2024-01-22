@@ -48,10 +48,10 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
-#include <sys/stat.h>
 
 #include <jimautoconf.h>
 #include <jim-subcmd.h>
+#include <jimiocompat.h>
 
 #ifdef HAVE_UTIMES
 #include <sys/time.h>
@@ -68,11 +68,17 @@
 #endif
 
 # ifndef MAXPATHLEN
+# ifdef PATH_MAX
+# define MAXPATHLEN PATH_MAX
+# else
 # define MAXPATHLEN JIM_PATH_LEN
+# endif
 # endif
 
 #if defined(__MINGW32__) || defined(__MSYS__) || defined(_MSC_VER)
 #define ISWINDOWS 1
+/* Even if we have symlink it isn't compatible enought to use */
+#undef HAVE_SYMLINK
 #else
 #define ISWINDOWS 0
 #endif
@@ -83,6 +89,18 @@
 #elif defined(HAVE_STRUCT_STAT_ST_MTIM)
     #define STAT_MTIME_US(STAT) ((STAT).st_mtim.tv_sec * 1000000ll + (STAT).st_mtim.tv_nsec / 1000)
 #endif
+
+/* On windows, convert backslashes to forward slashes (in place) in the null terminated path */
+static void JimFixPath(char *path)
+{
+    if (ISWINDOWS) {
+        /* Try to keep backslashes out of paths */
+        char *p = path;
+        while ((p = strchr(p, '\\')) != NULL) {
+            *p++ = '/';
+        }
+    }
+}
 
 /*
  *----------------------------------------------------------------------
@@ -140,11 +158,13 @@ static const char *JimGetFileType(int mode)
 /*
  *----------------------------------------------------------------------
  *
- * StoreStatData --
+ * Jim_FileStoreStatData --
  *
  *  This is a utility procedure that breaks out the fields of a
  *  "stat" structure and stores them in textual form into the
- *  elements of an associative array.
+ *  elements of an associative array (dict).
+ *  The result is also returned as the Tcl result.
+ *  If varName is NULL, the result is only returned, not stored.
  *
  * Results:
  *  Returns a standard Tcl return value.  If an error occurs then
@@ -161,7 +181,7 @@ static void AppendStatElement(Jim_Interp *interp, Jim_Obj *listObj, const char *
     Jim_ListAppendElement(interp, listObj, Jim_NewIntObj(interp, value));
 }
 
-static int StoreStatData(Jim_Interp *interp, Jim_Obj *varName, const struct stat *sb)
+int Jim_FileStoreStatData(Jim_Interp *interp, Jim_Obj *varName, const jim_stat_t *sb)
 {
     /* Just use a list to store the data */
     Jim_Obj *listObj = Jim_NewListObj(interp, NULL, 0);
@@ -254,10 +274,12 @@ static int file_cmd_dirname(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
     const char *path = Jim_String(objPtr);
     const char *p = strrchr(path, '/');
 
-    if (!p && path[0] == '.' && path[1] == '.' && path[2] == '\0') {
-        Jim_SetResultString(interp, "..", -1);
-    } else if (!p) {
+    if (!p) {
         Jim_SetResultString(interp, ".", -1);
+    }
+    else if (p[1] == 0) {
+        /* Trailing slash so do nothing */
+        Jim_SetResult(interp, objPtr);
     }
     else if (p == path) {
         Jim_SetResultString(interp, "/", -1);
@@ -306,18 +328,16 @@ static int file_cmd_split(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 
 static int file_cmd_rootname(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    Jim_Obj *objPtr = JimStripTrailingSlashes(interp, argv[0]);
-    const char *path = Jim_String(objPtr);
+    const char *path = Jim_String(argv[0]);
     const char *lastSlash = strrchr(path, '/');
     const char *p = strrchr(path, '.');
 
     if (p == NULL || (lastSlash != NULL && lastSlash > p)) {
-        Jim_SetResult(interp, objPtr);
+        Jim_SetResult(interp, argv[0]);
     }
     else {
         Jim_SetResultString(interp, path, p - path);
     }
-    Jim_DecrRefCount(interp, objPtr);
     return JIM_OK;
 }
 
@@ -352,25 +372,34 @@ static int file_cmd_tail(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
     return JIM_OK;
 }
 
+#ifndef HAVE_RESTRICT
+#define restrict
+#endif
+
+static char *JimRealPath(const char *restrict path, char *restrict resolved_path, size_t len)
+{
+#if defined(HAVE__FULLPATH)
+    return _fullpath(resolved_path, path, len);
+#elif defined(HAVE_REALPATH)
+    return realpath(path, resolved_path);
+#else
+    return NULL;
+#endif
+}
+
 static int file_cmd_normalize(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-#ifdef HAVE_REALPATH
     const char *path = Jim_String(argv[0]);
-    char *newname = Jim_Alloc(MAXPATHLEN + 1);
+    char *newname = Jim_Alloc(MAXPATHLEN);
 
-    if (realpath(path, newname)) {
+    if (JimRealPath(path, newname, MAXPATHLEN)) {
+        JimFixPath(newname);
         Jim_SetResult(interp, Jim_NewStringObjNoAlloc(interp, newname, -1));
         return JIM_OK;
     }
-    else {
-        Jim_Free(newname);
-        Jim_SetResultFormatted(interp, "can't normalize \"%#s\": %s", argv[0], strerror(errno));
-        return JIM_ERR;
-    }
-#else
-    Jim_SetResultString(interp, "Not implemented", -1);
+    Jim_Free(newname);
+    Jim_SetResultFormatted(interp, "can't normalize \"%#s\": %s", argv[0], strerror(errno));
     return JIM_ERR;
-#endif
 }
 
 static int file_cmd_join(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
@@ -476,8 +505,8 @@ static int file_cmd_delete(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
     int force = Jim_CompareStringImmediate(interp, argv[0], "-force");
 
     if (force || Jim_CompareStringImmediate(interp, argv[0], "--")) {
-        argc++;
-        argv--;
+        argc--;
+        argv++;
     }
 
     while (argc--) {
@@ -541,9 +570,9 @@ static int mkdir_all(char *path)
         }
         /* Maybe it already exists as a directory */
         if (errno == EEXIST) {
-            struct stat sb;
+            jim_stat_t sb;
 
-            if (stat(path, &sb) == 0 && S_ISDIR(sb.st_mode)) {
+            if (Jim_Stat(path, &sb) == 0 && S_ISDIR(sb.st_mode)) {
                 return 0;
             }
             /* Restore errno */
@@ -607,7 +636,12 @@ static int file_cmd_rename(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
             argv[1]);
         return JIM_ERR;
     }
-
+#if ISWINDOWS
+    if (access(dest, F_OK) == 0) {
+        /* Windows won't rename over an existing file */
+        remove(dest);
+    }
+#endif
     if (rename(source, dest) != 0) {
         Jim_SetResultFormatted(interp, "error renaming \"%#s\" to \"%#s\": %s", argv[0], argv[1],
             strerror(errno));
@@ -655,11 +689,11 @@ static int file_cmd_link(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 }
 #endif
 
-static int file_stat(Jim_Interp *interp, Jim_Obj *filename, struct stat *sb)
+static int file_stat(Jim_Interp *interp, Jim_Obj *filename, jim_stat_t *sb)
 {
     const char *path = Jim_String(filename);
 
-    if (stat(path, sb) == -1) {
+    if (Jim_Stat(path, sb) == -1) {
         Jim_SetResultFormatted(interp, "could not read \"%#s\": %s", filename, strerror(errno));
         return JIM_ERR;
     }
@@ -667,7 +701,7 @@ static int file_stat(Jim_Interp *interp, Jim_Obj *filename, struct stat *sb)
 }
 
 #ifdef HAVE_LSTAT
-static int file_lstat(Jim_Interp *interp, Jim_Obj *filename, struct stat *sb)
+static int file_lstat(Jim_Interp *interp, Jim_Obj *filename, jim_stat_t *sb)
 {
     const char *path = Jim_String(filename);
 
@@ -683,7 +717,7 @@ static int file_lstat(Jim_Interp *interp, Jim_Obj *filename, struct stat *sb)
 
 static int file_cmd_atime(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    struct stat sb;
+    jim_stat_t sb;
 
     if (file_stat(interp, argv[0], &sb) != JIM_OK) {
         return JIM_ERR;
@@ -716,7 +750,7 @@ static int JimSetFileTimes(Jim_Interp *interp, const char *filename, jim_wide us
 
 static int file_cmd_mtime(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    struct stat sb;
+    jim_stat_t sb;
 
     if (argc == 2) {
         jim_wide secs;
@@ -735,7 +769,7 @@ static int file_cmd_mtime(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 #ifdef STAT_MTIME_US
 static int file_cmd_mtimeus(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    struct stat sb;
+    jim_stat_t sb;
 
     if (argc == 2) {
         jim_wide us;
@@ -759,7 +793,7 @@ static int file_cmd_copy(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 
 static int file_cmd_size(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    struct stat sb;
+    jim_stat_t sb;
 
     if (file_stat(interp, argv[0], &sb) != JIM_OK) {
         return JIM_ERR;
@@ -770,7 +804,7 @@ static int file_cmd_size(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 
 static int file_cmd_isdirectory(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    struct stat sb;
+    jim_stat_t sb;
     int ret = 0;
 
     if (file_stat(interp, argv[0], &sb) == JIM_OK) {
@@ -782,7 +816,7 @@ static int file_cmd_isdirectory(Jim_Interp *interp, int argc, Jim_Obj *const *ar
 
 static int file_cmd_isfile(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    struct stat sb;
+    jim_stat_t sb;
     int ret = 0;
 
     if (file_stat(interp, argv[0], &sb) == JIM_OK) {
@@ -795,7 +829,7 @@ static int file_cmd_isfile(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 #ifdef HAVE_GETEUID
 static int file_cmd_owned(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    struct stat sb;
+    jim_stat_t sb;
     int ret = 0;
 
     if (file_stat(interp, argv[0], &sb) == JIM_OK) {
@@ -816,7 +850,7 @@ static int file_cmd_readlink(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 
     if (linkLength == -1) {
         Jim_Free(linkValue);
-        Jim_SetResultFormatted(interp, "couldn't readlink \"%#s\": %s", argv[0], strerror(errno));
+        Jim_SetResultFormatted(interp, "could not read link \"%#s\": %s", argv[0], strerror(errno));
         return JIM_ERR;
     }
     linkValue[linkLength] = 0;
@@ -827,7 +861,7 @@ static int file_cmd_readlink(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 
 static int file_cmd_type(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    struct stat sb;
+    jim_stat_t sb;
 
     if (file_lstat(interp, argv[0], &sb) != JIM_OK) {
         return JIM_ERR;
@@ -839,12 +873,12 @@ static int file_cmd_type(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 #ifdef HAVE_LSTAT
 static int file_cmd_lstat(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    struct stat sb;
+    jim_stat_t sb;
 
     if (file_lstat(interp, argv[0], &sb) != JIM_OK) {
         return JIM_ERR;
     }
-    return StoreStatData(interp, argc == 2 ? argv[1] : NULL, &sb);
+    return Jim_FileStoreStatData(interp, argc == 2 ? argv[1] : NULL, &sb);
 }
 #else
 #define file_cmd_lstat file_cmd_stat
@@ -852,12 +886,12 @@ static int file_cmd_lstat(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 
 static int file_cmd_stat(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-    struct stat sb;
+    jim_stat_t sb;
 
     if (file_stat(interp, argv[0], &sb) != JIM_OK) {
         return JIM_ERR;
     }
-    return StoreStatData(interp, argc == 2 ? argv[1] : NULL, &sb);
+    return Jim_FileStoreStatData(interp, argc == 2 ? argv[1] : NULL, &sb);
 }
 
 static const jim_subcmd_type file_command_table[] = {
@@ -1098,14 +1132,7 @@ static int Jim_PwdCmd(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
         Jim_Free(cwd);
         return JIM_ERR;
     }
-    else if (ISWINDOWS) {
-        /* Try to keep backslashes out of paths */
-        char *p = cwd;
-        while ((p = strchr(p, '\\')) != NULL) {
-            *p++ = '/';
-        }
-    }
-
+    JimFixPath(cwd);
     Jim_SetResultString(interp, cwd, -1);
 
     Jim_Free(cwd);
@@ -1114,9 +1141,7 @@ static int Jim_PwdCmd(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 
 int Jim_fileInit(Jim_Interp *interp)
 {
-    if (Jim_PackageProvide(interp, "file", "1.0", JIM_ERRMSG))
-        return JIM_ERR;
-
+    Jim_PackageProvideCheck(interp, "file");
     Jim_CreateCommand(interp, "file", Jim_SubCmdProc, (void *)file_command_table, NULL);
     Jim_CreateCommand(interp, "pwd", Jim_PwdCmd, NULL, NULL);
     Jim_CreateCommand(interp, "cd", Jim_CdCmd, NULL, NULL);

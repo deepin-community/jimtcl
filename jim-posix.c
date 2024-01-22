@@ -71,6 +71,7 @@ static int Jim_PosixForkCommand(Jim_Interp *interp, int argc, Jim_Obj *const *ar
 }
 #endif
 
+#if !defined(JIM_BOOTSTRAP)
 static int Jim_PosixGetidsCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
     Jim_Obj *objv[8];
@@ -134,17 +135,18 @@ static int Jim_PosixUptimeCommand(Jim_Interp *interp, int argc, Jim_Obj *const *
 #endif
     return JIM_OK;
 }
+#endif /* JIM_BOOTSTRAP */
 
 int Jim_posixInit(Jim_Interp *interp)
 {
-    if (Jim_PackageProvide(interp, "posix", "1.0", JIM_ERRMSG))
-        return JIM_ERR;
-
+    Jim_PackageProvideCheck(interp, "posix");
 #ifdef HAVE_FORK
     Jim_CreateCommand(interp, "os.fork", Jim_PosixForkCommand, NULL, NULL);
 #endif
+#if !defined(JIM_BOOTSTRAP)
     Jim_CreateCommand(interp, "os.getids", Jim_PosixGetidsCommand, NULL, NULL);
     Jim_CreateCommand(interp, "os.gethostname", Jim_PosixGethostnameCommand, NULL, NULL);
     Jim_CreateCommand(interp, "os.uptime", Jim_PosixUptimeCommand, NULL, NULL);
+#endif /* JIM_BOOTSTRAP */
     return JIM_OK;
 }

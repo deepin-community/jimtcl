@@ -1,0 +1,20 @@
+Description: fix ftbfs on s390 due to test failed 
+Origin: https://github.com/msteveb/jimtcl/commit/cf3dfddc35f6df15eaf8e966618b51394c8dce8b 
+Last-Update: 2023-08-23 <YYYY-MM-DD, last update of the meta-information, optional>
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/tests/event.test
++++ b/tests/event.test
+@@ -120,9 +120,9 @@
+ 	after cancel $i
+     }
+     after 10; update; # On Mac make sure update won't take long
+-    after 100 {set x x-done}
+-    after 200 {set y y-done}
+-    after 300 {set z z-done}
++    after 200 {set x x-done}
++    after 400 {set y y-done}
++    after 600 {set z z-done}
+     after idle {set q q-done}
+     set x before
+     set y before
