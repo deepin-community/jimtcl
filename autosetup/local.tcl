@@ -59,13 +59,34 @@ proc check-extension-status {ext required {asmodule 0}} {
     set use_pkgconfig 0
     set pkgconfig [ext-get $ext pkg-config]
     if {$pkgconfig ne ""} {
-        # pkg-config support is optional, so explicitly initialse it here
+        # pkg-config support is optional, so explicitly initialise it here
         if {[pkg-config-init 0]} {
-            lassign $pkgconfig pkg args
-
-            if {[pkg-config {*}$pkgconfig]} {
-                # Found via pkg-config so ignore check and libdep
-                set use_pkgconfig 1
+            # Check for at least one set of alternates
+            foreach pinfo [split $pkgconfig |] {
+                set ok 1
+                set pkgs {}
+                foreach pkg [split $pinfo ,] {
+                    set args [lassign $pkg pkgname]
+                    set pkg [string trim $pkg]
+                    set optional 0
+                    if {[string match {*[*]} $pkg]} {
+                        # This package is optional
+                        set optional 1
+                        set pkg [string range $pkg 0 end-1]
+                    }
+                    if {![pkg-config $pkg {*}$args]} {
+                        if {!$optional} {
+                            set ok 0
+                            break
+                        }
+                    } else {
+                        lappend pkgs $pkg
+                    }
+                }
+                if {$ok} {
+                    set use_pkgconfig 1
+                    break
+                }
             }
         }
     }
@@ -124,10 +145,7 @@ proc check-extension-status {ext required {asmodule 0}} {
         } else {
             msg-result "Extension $ext...module"
             if {$use_pkgconfig} {
-                define-append LDLIBS_$ext [pkg-config-get $pkg LIBS]
-                define-append LDFLAGS [pkg-config-get $pkg LDFLAGS]
-                define-append CCOPTS [pkg-config-get $pkg CFLAGS]
-                define-append PKG_CONFIG_REQUIRES $pkg
+                add-pkgconfig-deps $ext $pkgs $asmodule
             } else {
                 foreach i [ext-get $ext libdep] {
                     define-append LDLIBS_$ext [get-define $i ""]
@@ -149,10 +167,7 @@ proc check-extension-status {ext required {asmodule 0}} {
         return [ext-set-status $ext x]
     }
     if {$use_pkgconfig} {
-        define-append LDLIBS [pkg-config-get $pkg LIBS]
-        define-append LDFLAGS [pkg-config-get $pkg LDFLAGS]
-        define-append CCOPTS [pkg-config-get $pkg CFLAGS]
-        define-append PKG_CONFIG_REQUIRES $pkg
+        add-pkgconfig-deps $ext $pkgs $asmodule
     } else {
         foreach i [ext-get $ext libdep] {
             define-append LDLIBS [get-define $i ""]
@@ -161,9 +176,26 @@ proc check-extension-status {ext required {asmodule 0}} {
     return [ext-set-status $ext y]
 }
 
+# Add dependencies for a pkg-config module to the extension
+proc add-pkgconfig-deps {ext pkgs asmodule} {
+    foreach pkg $pkgs {
+        if {$asmodule} {
+            define-append LDLIBS_$ext [pkg-config-get $pkg LIBS]
+        } else {
+            define-append LDLIBS [pkg-config-get $pkg LIBS]
+        }
+        define-append LDFLAGS [pkg-config-get $pkg LDFLAGS]
+        define-append AS_CFLAGS [pkg-config-get $pkg CFLAGS]
+        define-append PKG_CONFIG_REQUIRES $pkg
+    }
+}
+
 # Examines the user options (the $withinfo array)
 # and the extension database ($extdb) to determine
 # what is selected, and in what way.
+#
+# If $allextmod is 1, extensions that would normally be disabled
+# are enabled as modules if their prerequisites are met
 #
 # The results are available via ext-get-status
 # And a dictionary is returned containing four keys:
@@ -171,7 +203,7 @@ proc check-extension-status {ext required {asmodule 0}} {
 #   static-tcl   extensions which are static Tcl
 #   module-c     extensions which are C modules
 #   module-tcl   extensions which are Tcl modules
-proc check-extensions {} {
+proc check-extensions {allextmod} {
     global extdb withinfo
 
     # Check valid extension names
@@ -184,23 +216,31 @@ proc check-extensions {} {
     set extlist [lsort [dict keys [dict get $extdb attrs]]]
 
     set withinfo(maybe) {}
+    set withinfo(maybemod) {}
 
     # Now work out the default status. We have.
-    # normal case, include !off, !optional if possible
-    # --full, include !off if possible
-    # --without=default, don't include optional or off
-    if {$withinfo(nodefault)} {
-        lappend withinfo(maybe) stdlib
-    } else {
-        foreach i $extlist {
-            if {[ext-has $i off]} {
-                continue
-            }
-            if {[ext-has $i optional] && !$withinfo(optional)} {
-                continue
-            }
-            lappend withinfo(maybe) $i
-        }
+    # normal case: include !off, !optional if possible
+    # --without=default: only include always
+	foreach i $extlist {
+		if {$withinfo(nodefault)} {
+			if {[ext-has $i always]} {
+				lappend withinfo(maybe) $i
+			}
+			continue
+		}
+		if {[ext-has $i off]} {
+			if {$allextmod} {
+				lappend withinfo(maybemod) $i
+			}
+			continue
+		}
+		if {[ext-has $i optional] && !$withinfo(optional)} {
+			if {$allextmod} {
+				lappend withinfo(maybemod) $i
+			}
+			continue
+		}
+		lappend withinfo(maybe) $i
     }
 
     foreach i $extlist {
@@ -212,6 +252,9 @@ proc check-extensions {} {
     }
     foreach i $withinfo(maybe) {
         check-extension-status $i wanted
+    }
+    foreach i $withinfo(maybemod) {
+        check-extension-status $i wanted 1
     }
 
     array set extinfo {static-c {} static-tcl {} module-c {} module-tcl {}}

@@ -1,0 +1,106 @@
+commit 082196058afc394334e0873f407360a90223150d
+Author: Steve Bennett <steveb@workware.net.au>
+Date:   Sat Jun 17 00:52:12 2023 +1000
+
+    file: use 64 bit stat functions if necessary
+    
+    Some systems may require explicit use of stat64, etc.
+    Testing to see if this corresponds to systems that require -D_FILE_OFFSET_BITS=64
+    
+    This may help with #263
+
+https://github.com/msteveb/jimtcl/commit/082196058afc394334e0873f407360a90223150d
+
+--- a/auto.def
++++ b/auto.def
+@@ -256,7 +256,7 @@
+     define-append LDLIBS [get-define lib_socket]
+ }
+ 
+-cc-check-functions ualarm lstat fork system select execvpe
++cc-check-functions ualarm fork system select execvpe
+ cc-check-functions geteuid mkstemp isatty
+ cc-check-functions regcomp waitpid sigaction sys_signame sys_siglist isascii
+ cc-check-functions syslog opendir readlink sleep usleep pipe getaddrinfo utimes
+@@ -300,6 +300,14 @@
+ }
+ 
+ cc-check-lfs
++
++if {[get-define _FILE_OFFSET_BITS] != 64 || ![cc-check-functions stat64]} {
++    # Modern systems and really old systems have plain stat, fstat, lstat
++    cc-check-functions fstat lstat
++} else {
++    # But perhaps some 32 bit systems still require explicit use of the 64 bit versions
++    cc-check-functions fstat64 lstat64
++}
+ cc-check-functions fseeko ftello
+ 
+ define TCL_LIBRARY [get-define libdir]/jim
+--- a/jim-file.c
++++ b/jim-file.c
+@@ -700,12 +700,12 @@
+     return JIM_OK;
+ }
+ 
+-#ifdef HAVE_LSTAT
++#ifdef Jim_LinkStat
+ static int file_lstat(Jim_Interp *interp, Jim_Obj *filename, jim_stat_t *sb)
+ {
+     const char *path = Jim_String(filename);
+ 
+-    if (lstat(path, sb) == -1) {
++    if (Jim_LinkStat(path, sb) == -1) {
+         Jim_SetResultFormatted(interp, "could not read \"%#s\": %s", filename, strerror(errno));
+         return JIM_ERR;
+     }
+@@ -870,7 +870,7 @@
+     return JIM_OK;
+ }
+ 
+-#ifdef HAVE_LSTAT
++#ifdef Jim_LinkStat
+ static int file_cmd_lstat(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+ {
+     jim_stat_t sb;
+--- a/jimiocompat.h
++++ b/jimiocompat.h
+@@ -70,9 +70,25 @@
+     #define Jim_FileStat _fstat64
+ 
+ #else
+-    typedef struct stat jim_stat_t;
+-    #define Jim_Stat stat
+-    #define Jim_FileStat fstat
++    #if defined(HAVE_STAT64)
++        typedef struct stat64 jim_stat_t;
++        #define Jim_Stat stat64
++        #if defined(HAVE_FSTAT64)
++            #define Jim_FileStat fstat64
++        #endif
++        #if defined(HAVE_LSTAT64)
++            #define Jim_LinkStat lstat64
++        #endif
++    #else
++        typedef struct stat jim_stat_t;
++        #define Jim_Stat stat
++        #if defined(HAVE_FSTAT)
++            #define Jim_FileStat fstat
++        #endif
++        #if defined(HAVE_LSTAT)
++            #define Jim_LinkStat lstat
++        #endif
++    #endif
+ 
+     #if defined(HAVE_UNISTD_H)
+         #include <unistd.h>
+--- a/make-bootstrap-jim
++++ b/make-bootstrap-jim
+@@ -101,6 +101,7 @@
+ #define HAVE_DIRENT_H
+ #define HAVE_UNISTD_H
+ #define HAVE_UMASK
++#define _FILE_OFFSET_BITS 64
+ #endif
+ EOF
+ 

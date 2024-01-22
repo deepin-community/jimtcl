@@ -11,7 +11,7 @@ test expr-1.2 "Compare strings with embedded nulls" {
 } {1}
 
 test expr-1.3 "Hex values" {
-	set mask1 [expr 0x4050 & 0x0CCC]
+	set mask1 [expr {0x4050 & 0x0CCC}]
 } {64}
 
 test expr-1.4 "Ternary operator - true" {
@@ -141,5 +141,18 @@ test expr-4.1 "Shimmering" {
 	expr {$a < 3.0}
 	set a
 } {2}
+
+test expr-5.1 "Not" {
+	lmap x {1 0 true false on off yes no} { expr {!$x} }
+} {0 1 0 1 0 1 0 1}
+
+test expr-5.2 "Not" -body {
+	expr {!this}
+} -returnCodes error -result {syntax error in expression: "!this"}
+
+test expr-5.3 {boolean in expression} {
+	expr {true ? 4 : 5}
+} {4}
+
 
 testreport

@@ -231,7 +231,7 @@ static int str_int_len(const int *seq)
  * Beware that the optimization-preparation code in here knows about some
  * of the structure of the compiled regexp.
  */
-int regcomp(regex_t *preg, const char *exp, int cflags)
+int jim_regcomp(regex_t *preg, const char *exp, int cflags)
 {
 	int scan;
 	int longest;
@@ -719,7 +719,7 @@ static int regatom(regex_t *preg, int *flagp)
 				pattern++;
 			}
 
-			while (*pattern && *pattern != ']') {
+			while (*pattern != ']') {
 				/* Is this a range? a-z */
 				int start;
 				int end;
@@ -730,6 +730,11 @@ static int regatom(regex_t *preg, int *flagp)
 					CC_NUM
 				};
 				int cc;
+
+				if (!*pattern) {
+					preg->err = REG_ERR_UNMATCHED_BRACKET;
+					return 0;
+				}
 
 				pattern += reg_utf8_tounicode_case(pattern, &start, nocase);
 				if (start == '\\') {
@@ -754,6 +759,10 @@ static int regatom(regex_t *preg, int *flagp)
 						preg->err = REG_ERR_NULL_CHAR;
 						return 0;
 					}
+					if (start == '\\' && *pattern == 0) {
+						preg->err = REG_ERR_INVALID_ESCAPE;
+						return 0;
+					}
 				}
 				if (pattern[0] == '-' && pattern[1] && pattern[1] != ']') {
 					/* skip '-' */
@@ -763,6 +772,10 @@ static int regatom(regex_t *preg, int *flagp)
 						pattern += reg_decode_escape(pattern, &end);
 						if (end == 0) {
 							preg->err = REG_ERR_NULL_CHAR;
+							return 0;
+						}
+						if (start == '\\' && *pattern == 0) {
+							preg->err = REG_ERR_INVALID_ESCAPE;
 							return 0;
 						}
 					}
@@ -869,7 +882,7 @@ cc_switch:
 		ch = *preg->regparse++;
 		switch (ch) {
 		case '\0':
-			preg->err = REG_ERR_TRAILING_BACKSLASH;
+			preg->err = REG_ERR_INVALID_ESCAPE;
 			return 0;
 		case 'A':
 			ret = regnode(preg, BOLX);
@@ -1101,7 +1114,7 @@ static int regrepeat(regex_t *preg, int p, int max);
 /*
  - regexec - match a regexp against a string
  */
-int regexec(regex_t  *preg,  const  char *string, size_t nmatch, regmatch_t pmatch[], int eflags)
+int jim_regexec(regex_t  *preg,  const  char *string, size_t nmatch, regmatch_t pmatch[], int eflags)
 {
 	const char *s;
 	int scan;
@@ -1486,7 +1499,7 @@ static int regmatch(regex_t *preg, int prog)
 			/* Can't match at BOL */
 			if (preg->reginput > preg->regbol) {
 				/* Current must be EOL or nonword */
-				if (reg_iseol(preg, c) || !isalnum(UCHAR(c)) || c != '_') {
+				if (reg_iseol(preg, c) || !(isalnum(UCHAR(c)) || c == '_')) {
 					c = preg->reginput[-1];
 					/* Previous must be word */
 					if (isalnum(UCHAR(c)) || c == '_') {
@@ -1582,6 +1595,8 @@ static int regmatch(regex_t *preg, int prog)
 					}
 					return(1);
 				}
+				/* Restore input position after failure */
+				preg->reginput = save;
 				return(0);
 			}
 			return REG_ERR_INTERNAL;
@@ -1854,7 +1869,7 @@ static const char *regprop( int op )
 }
 #endif /* JIM_BOOTSTRAP */
 
-size_t regerror(int errcode, const regex_t *preg, char *errbuf,  size_t errbuf_size)
+size_t jim_regerror(int errcode, const regex_t *preg, char *errbuf,  size_t errbuf_size)
 {
 	static const char *error_strings[] = {
 		"success",
@@ -1873,9 +1888,10 @@ size_t regerror(int errcode, const regex_t *preg, char *errbuf,  size_t errbuf_s
 		"nested count",
 		"internal error",
 		"count follows nothing",
-		"trailing backslash",
+		"invalid escape \\ sequence",
 		"corrupted program",
 		"contains null char",
+		"brackets [] not balanced",
 	};
 	const char *err;
 
@@ -1889,7 +1905,7 @@ size_t regerror(int errcode, const regex_t *preg, char *errbuf,  size_t errbuf_s
 	return snprintf(errbuf, errbuf_size, "%s", err);
 }
 
-void regfree(regex_t *preg)
+void jim_regfree(regex_t *preg)
 {
 	free(preg->program);
 }

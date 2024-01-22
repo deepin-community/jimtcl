@@ -1,3 +1,5 @@
-0001-Use-footer-style-none-in-asciidoc-call.patch
-0002-Disable-RPATH-support-in-Debian-builds.patch
-add-sw64-porting.patch
+0001-build-define-_GNU_SOURCE-only-on-the-command-line.patch
+0001-Disable-RPATH-support-in-Debian-builds.patch
+disable-ssl-test.patch
+use-64-bits-stat-on-32-bits-systemd.patch
+increase-test-time-tests.patch

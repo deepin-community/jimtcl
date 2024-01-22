@@ -4,15 +4,23 @@
 set testinfo(verbose) 0
 set testinfo(numpass) 0
 set testinfo(stoponerror) 0
+set testinfo(template) 0
 set testinfo(numfail) 0
 set testinfo(numskip) 0
 set testinfo(numtests) 0
 set testinfo(reported) 0
 set testinfo(failed) {}
+set testinfo(source) [file tail $::argv0]
 
+# -verbose or $testverbose show OK/ERR of individual tests
 if {[lsearch $argv "-verbose"] >= 0 || [info exists env(testverbose)]} {
 	incr testinfo(verbose)
 }
+# -template causes failed tests to output a template test that would succeed
+if {[lsearch $argv "-template"] >= 0} {
+	incr testinfo(template)
+}
+# -stoponerror or $stoponerror stops on the first failed test
 if {[lsearch $argv "-stoponerror"] >= 0 || [info exists env(stoponerror)]} {
 	incr testinfo(stoponerror)
 }
@@ -53,8 +61,15 @@ proc needs {type what {packages {}}} {
 	error "Unknown needs type: $type"
 }
 
+# Simplify setting constraints for whether commands exist
+proc testCmdConstraints {args} {
+	foreach cmd $args {
+		testConstraint $cmd [expr {[info commands $cmd] ne {}}]
+	}
+}
+
 proc skiptest {{msg {}}} {
-	puts [format "%16s:   --- skipped$msg" $::argv0]
+	puts [format "%16s:   --- skipped$msg" $::testinfo(source)]
 	exit 0
 }
 
@@ -137,7 +152,7 @@ if {![exists -proc puts]} {
 proc script_source {script} {
 	lassign [info source $script] f l
 	if {$f ne ""} {
-		puts "At      : $f:$l"
+		puts "$f:$l:Error test failure"
 		return \t$f:$l
 	}
 }
@@ -145,7 +160,7 @@ proc script_source {script} {
 proc error_source {} {
 	lassign [info stacktrace] p f l
 	if {$f ne ""} {
-		puts "At      : $f:$l"
+		puts "$f:$l:Error test failure"
 		return \t$f:$l
 	}
 }
@@ -154,7 +169,7 @@ proc package-or-skip {name} {
 	if {[catch {
 		package require $name
 	}]} {
-		puts [format "%16s:   --- skipped" $::argv0]
+		puts [format "%16s:   --- skipped" $::testinfo(source)]
 		exit 0
 	}
 }
@@ -180,9 +195,25 @@ proc bytestring {x} {
 	return $x
 }
 
+# Takes a stacktrace and applies [file tail] to the filenames.
+# This allows stacktrace tests to be run from a directory other than the source directory.
+proc basename-stacktrace {stacktrace} {
+	set result {}
+	foreach {p f l} $stacktrace {
+		lappend result $p [file tail $f] $l
+	}
+	return $result
+}
+
+# Takes a list of {filename line} and returns {basename line}
+proc basename-source {list} {
+	list [file tail [lindex $list 0]] [lindex $list 1]
+}
+
 # Note: We don't support -output or -errorOutput yet
 proc test {id descr args} {
-	set a [dict create -returnCodes {ok return} -match exact -result {} -constraints {} -body {} -setup {} -cleanup {}]
+	set default [dict create -returnCodes {ok return} -match exact -result {} -constraints {} -body {} -setup {} -cleanup {}]
+	set a $default
 	if {[lindex $args 0] ni [dict keys $a]} {
 		if {[llength $args] == 2} {
 			lassign $args body result constraints
@@ -225,8 +256,10 @@ proc test {id descr args} {
 
 	if {[info return $rc] ni $a(-returnCodes) && $rc ni $a(-returnCodes)} {
 		set ok 0
-		set expected "rc=$a(-returnCodes) result=$a(-result)"
-		set result "rc=[info return $rc] result=$result"
+		set expected "rc=[list $a(-returnCodes)] result=[list $a(-result)]"
+		set actual "rc=[info return $rc] result=[list $result]"
+		# Now for the template, update -returnCodes
+		set a(-returnCodes) [info return $rc]
 	} else {
 		if {$a(-match) eq "exact"} {
 			set ok [string equal $a(-result) $result]
@@ -237,7 +270,8 @@ proc test {id descr args} {
 		} else {
 			return -code error "$id: unknown match type: $a(-match)"
 		}
-		set expected $a(-result)
+		set actual [list $result]
+		set expected [list $a(-result)]
 	}
 
 	if {$ok} {
@@ -257,9 +291,23 @@ proc test {id descr args} {
 	} else {
 		set source [error_source]
 	}
-	puts "Expected: '$expected'"
-	puts "Got     : '$result'"
+	puts "Expected: $expected"
+	puts "Got     : $actual"
 	puts ""
+	if {$::testinfo(template)} {
+		# We can't really do -match glob|regexp so
+		# just store the result as-is for -match exact
+		set a(-result) $result
+
+		set template [list test $id $descr]
+		foreach key {-constraints -setup -body -returnCodes -match -result -cleanup} {
+			if {$a($key) ne $default($key)} {
+				lappend template $key $a($key)
+			}
+		}
+		puts "### template"
+		puts $template\n
+	}
 	incr ::testinfo(numfail)
 	lappend ::testinfo(failed) [list $id $descr $source $expected $result]
 	if {$::testinfo(stoponerror)} {
@@ -279,9 +327,9 @@ proc testreport {} {
 	incr ::testinfo(reported)
 
 	if {$::testinfo(verbose)} {
-		puts -nonewline "\n$::argv0"
+		puts -nonewline "\n$::testinfo(source)"
 	} else {
-		puts -nonewline [format "%16s" $::argv0]
+		puts -nonewline [format "%16s" $::testinfo(source)]
 	}
 	puts [format ": Total %5d   Passed %5d  Skipped %5d  Failed %5d" \
 		$::testinfo(numtests) $::testinfo(numpass) $::testinfo(numskip) $::testinfo(numfail)]

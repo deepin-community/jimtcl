@@ -23,20 +23,22 @@ override_dh_autoreconf:
 	# Do not run autoreconf, it is not used
 
 override_dh_auto_configure: autosetup/jimsh0.c
-	dh_auto_configure --builddirectory=static/
-	dh_auto_configure -- --shared
+	dh_auto_configure --builddirectory=static/ --
+	dh_auto_configure --builddirectory=shared/ -- --shared
 
 override_dh_auto_build:
 	dh_auto_build --builddirectory=static/
-	dh_auto_build
+	dh_auto_build --builddirectory=shared/
 
 override_dh_auto_test:
 	dh_auto_test --builddirectory=static/
-	dh_auto_test
+	dh_auto_test --builddirectory=shared/
+
 
 override_dh_auto_install:
 	dh_auto_install --builddirectory=static/
-	dh_auto_install
+	dh_auto_install --builddirectory=shared/
+
 
 override_dh_install:
 	dh_install
@@ -53,3 +55,4 @@ override_dh_auto_clean:
 	rm -f libjim.so*
 	rm -f tests/exec.tmp1
 	rm -Rf static/
+	rm -Rf shared/

@@ -11,8 +11,7 @@ source [file dirname [info script]]/testing.tcl
 
 needs constraint jim
 catch {package require regexp}
-testConstraint regexp [expr {[info commands regexp] ne {}}]
-testConstraint lambda [expr {[info commands ref] ne {}}]
+testCmdConstraints regexp readdir lambda
 
 ################################################################################
 # SET
@@ -372,7 +371,7 @@ test lset-4.2 {lset, not compiled, 3 args, bad index} {
     list [catch {
 	eval [list $lset a [list 2a2] w]
     } msg] $msg
-} {1 {bad index "2a2": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "2a2": must be intexpr or end?[+-]intexpr?}}
 
 test lset-4.3 {lset, not compiled, 3 args, index out of range} {
     set a {x y z}
@@ -407,7 +406,7 @@ test lset-4.8 {lset, not compiled, 3 args, bad index} {
     list [catch {
 	eval [list $lset a 2a2 w]
     } msg] $msg
-} {1 {bad index "2a2": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "2a2": must be intexpr or end?[+-]intexpr?}}
 
 test lset-4.9 {lset, not compiled, 3 args, index out of range} {
     set a {x y z}
@@ -543,7 +542,7 @@ test lset-7.10 {lset, not compiled, data sharing} {
 test lset-8.3 {lset, not compiled, bad second index} {
     set a {{b c} {d e}}
     list [catch {eval [list $lset a 0 2a2 f]} msg] $msg
-} {1 {bad index "2a2": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "2a2": must be intexpr or end?[+-]intexpr?}}
 
 test lset-8.5 {lset, not compiled, second index out of range} {
     set a {{b c} {d e} {f g}}
@@ -1270,11 +1269,10 @@ test incr-1.23 {TclCompileIncrCmd: increment given, formatted int != int} {
     set i 25
     incr i 000012345     ;# a decimal literal
 } 12370
-test incr-1.24 {TclCompileIncrCmd: increment given, formatted int != int} {
+test incr-1.24 {TclCompileIncrCmd: increment given, formatted int != int} -body {
     set i 25
-    catch {incr i 1a} msg
-    set msg
-} {expected integer but got "1a"}
+    incr i 1a
+} -returnCodes error -match glob -result {expected integer *but got "1a"}
 
 test incr-1.25 {TclCompileIncrCmd: too many arguments} {
     set i 10
@@ -1283,10 +1281,10 @@ test incr-1.25 {TclCompileIncrCmd: too many arguments} {
 } {wrong # args: should be "incr varName ?increment?"}
 
 
-test incr-1.29 {TclCompileIncrCmd: runtime error, bad variable value} {
+test incr-1.29 {TclCompileIncrCmd: runtime error, bad variable value} -body {
     set x "  -  "
-    list [catch {incr x 1} msg] $msg
-} {1 {expected integer but got "  -  "}}
+    incr x 1
+} -returnCodes error -match glob -result {expected integer *but got "  -  "}
 
 test incr-1.30 {TclCompileIncrCmd: array var, braced (no subs)} {
     catch {unset array}
@@ -1489,12 +1487,11 @@ test incr-2.23 {incr command (not compiled): increment given, formatted int != i
     set i 25
     $z i 000012345     ;# an octal literal
 } 12370
-test incr-2.24 {incr command (not compiled): increment given, formatted int != int} {
+test incr-2.24 {incr command (not compiled): increment given, formatted int != int} -body {
     set z incr
     set i 25
-    catch {$z i 1a} msg
-    set msg
-} {expected integer but got "1a"}
+    $z i 1a
+} -returnCodes error -match glob -result {expected integer *but got "1a"}
 
 test incr-2.25 {incr command (not compiled): too many arguments} {
     set z incr
@@ -1503,11 +1500,11 @@ test incr-2.25 {incr command (not compiled): too many arguments} {
     set msg
 } {wrong # args: should be "incr varName ?increment?"}
 
-test incr-2.29 {incr command (not compiled): runtime error, bad variable value} {
+test incr-2.29 {incr command (not compiled): runtime error, bad variable value} -body {
     set z incr
     set x "  -  "
-    list [catch {$z x 1} msg] $msg
-} {1 {expected integer but got "  -  "}}
+    $z x 1
+} -returnCodes error -match glob -result {expected integer *but got "  -  "}
 
 ################################################################################
 # LLENGTH
@@ -1558,7 +1555,7 @@ test lindex-2.2 {singleton index list} {
 test lindex-2.4 {malformed index list} {
     set x \{
     list [catch { eval [list $lindex {a b c} $x] } result] $result
-} {1 bad\ index\ \"\{\":\ must\ be\ integer?\[+-\]integer?\ or\ end?\[+-\]integer?}
+} {1 bad\ index\ \"\{\":\ must\ be\ intexpr\ or\ end?\[+-\]intexpr?}
 
 # Indices that are integers or convertible to integers
 
@@ -1617,7 +1614,7 @@ test lindex-4.5 {index = end-3} {
 test lindex-4.8 {bad integer, not octal} {
     set x end-0a2
     list [catch { eval [list $lindex {a b c} $x] } result] $result
-} {1 {bad index "end-0a2": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "end-0a2": must be intexpr or end?[+-]intexpr?}}
 
 #test lindex-4.9 {incomplete end} {
 #    set x en
@@ -1627,11 +1624,11 @@ test lindex-4.8 {bad integer, not octal} {
 test lindex-4.10 {incomplete end-} {
     set x end-
     list [catch { eval [list $lindex {a b c} $x] } result] $result
-} {1 {bad index "end-": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "end-": must be intexpr or end?[+-]intexpr?}}
 
 test lindex-5.1 {bad second index} {
     list [catch { eval [list $lindex {a b c} 0 0a2] } result] $result
-} {1 {bad index "0a2": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "0a2": must be intexpr or end?[+-]intexpr?}}
 
 test lindex-5.2 {good second index} {
     eval [list $lindex {{a b c} {d e f} {g h i}} 1 2]
@@ -1681,7 +1678,7 @@ test lindex-10.2 {singleton index list} {
 test lindex-10.4 {malformed index list} {
     set x \{
     list [catch { lindex {a b c} $x } result] $result
-} {1 bad\ index\ \"\{\":\ must\ be\ integer?\[+-\]integer?\ or\ end?\[+-\]integer?}
+} {1 bad\ index\ \"\{\":\ must\ be\ intexpr\ or\ end?\[+-\]intexpr?}
 
 # Indices that are integers or convertible to integers
 
@@ -1761,16 +1758,16 @@ test lindex-12.5 {index = end-3} {
 test lindex-12.8 {bad integer, not octal} {
     set x end-0a2
     list [catch { lindex {a b c} $x } result] $result
-} {1 {bad index "end-0a2": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "end-0a2": must be intexpr or end?[+-]intexpr?}}
 
 test lindex-12.10 {incomplete end-} {
     set x end-
     list [catch { lindex {a b c} $x } result] $result
-} {1 {bad index "end-": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "end-": must be intexpr or end?[+-]intexpr?}}
 
 test lindex-13.1 {bad second index} {
     list [catch { lindex {a b c} 0 0a2 } result] $result
-} {1 {bad index "0a2": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "0a2": must be intexpr or end?[+-]intexpr?}}
 
 test lindex-13.2 {good second index} {
     catch {
@@ -1837,6 +1834,34 @@ test lindex-16.3 {data reuse} {
 test lindex-17.1 {no index} {
     lindex {a b c}
 } {a b c}
+
+test lindex-18.1 {multiple +n} {
+    lindex {a b c d e f g} 1+1+1
+} {d}
+
+test lindex-18.2 {multiple +n/-n} {
+    lindex {a b c d e f g} 1+2-1
+} {c}
+
+test lindex-18.3 {end + multiple +n/-n} {
+    lindex {a b c d e f g} end-1-1
+} {e}
+
+test lindex-18.3 {end + multiple +n/-n} {
+    lindex {a b c d e f g} end-3+1
+} {e}
+
+test lindex-18.4 {multiple +/- in error} -body {
+    lindex {a b c d e f g} 1-x+3
+} -returnCodes error -match glob -result "bad index*"
+
+test lindex-18.5 {multiple +/- in error} -body {
+    lindex {a b c d e f g} 2-1+4x
+} -returnCodes error -match glob -result "bad index*"
+
+test lindex-18.6 {multiple +/- in error} -body {
+    lindex {a b c d e f g} end-3x-1
+} -returnCodes error -match glob -result "bad index*"
 
 catch { unset lindex}
 catch { unset minus }
@@ -1951,7 +1976,7 @@ test foreach-6.1 {noncompiled foreach and shared variable or value list objects 
   catch {unset x}
   foreach {12.0} {a b c} {
     set x 12.0  
-    set x [expr $x + 1]
+    set x [expr {$x + 1}]
   }
   set x
 } 13.0
@@ -2025,7 +2050,7 @@ test string-7.1 {string last, too few args} {
 } {1 {wrong # args: should be "string last subString string ?index?"}}
 test string-7.2 {string last, bad args} {
     list [catch {string last a b c} msg] $msg
-} {1 {bad index "c": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "c": must be intexpr or end?[+-]intexpr?}}
 test string-7.3 {string last, too many args} {
     list [catch {string last a b c d} msg] $msg
 } {1 {wrong # args: should be "string last subString string ?index?"}}
@@ -2500,6 +2525,15 @@ test switch-3.6 {-exact vs. -glob vs. -regexp} {
 test switch-3.7 {-exact vs. -glob vs. -regexp} {
     list [catch {switch -foo a b c} msg] $msg
 } {1 {bad option "-foo": must be -exact, -glob, -regexp, -command procname or --}}
+
+test switch-3.8 {switch -regexp with option-like pattern} regexp {
+    switch -regexp -- -def {
+	-abc {concat first}
+	-def {concat second}
+	-ghi {concat third}
+	default	{concat none}
+    }
+} second
 
 test switch-4.1 {error in executed command} {
     list [catch {switch a a {error "Just a test"} default {expr 1}} msg] \
@@ -3340,7 +3374,7 @@ test range-1.9 {basic range test} {
 test range-2.0 {foreach range test} {
     set k 0
     foreach {x y} [range 100] {
-	incr k [expr {$x*$y}]
+        incr k [expr {$x*$y}]
     }
     set k
 } {164150}
@@ -3349,8 +3383,8 @@ test range-2.1 {foreach range test without obj reuse} {
     set k 0
     set trash {}
     foreach {x y} [range 100] {
-	incr k [expr {$x*$y}]
-	lappend trash $x $y
+        incr k [expr {$x*$y}]
+        lappend trash $x $y
     }
     set trash {}
     set k
@@ -3359,7 +3393,7 @@ test range-2.1 {foreach range test without obj reuse} {
 test range-2.2 {range element shimmering test} {
     set k {}
     foreach x [range 0 10] {
-	append k [llength $x]
+        append k [llength $x]
     }
     set k
 } {1111111111}
@@ -3385,11 +3419,39 @@ test range-5.0 {lindex llength range test} {
     set trash {}
     set r [range 100]
     for {set i 0} {$i < [llength $r]} {incr i 2} {
-	incr k [expr {[lindex $r $i]*[lindex $r [expr {$i+1}]]}]
+        incr k [expr {[lindex $r $i]*[lindex $r [expr {$i+1}]]}]
     }
     set trash {}
     set k
 } {164150}
+
+test range-6.1 {range} -body {
+    range
+} -returnCodes error -result {wrong # args: should be "range ?start? end ?step?"}
+
+test range-6.2 {range} -body {
+    range foo
+} -returnCodes error -match glob -result {expected integer *but got "foo"}
+
+test range-6.3 {range} -body {
+    range 2 bar
+} -returnCodes error -match glob -result {expected integer *but got "bar"}
+
+test range-6.4 {range} -body {
+    range 2 4 foo
+} -returnCodes error -match glob -result {expected integer *but got "foo"}
+
+test range-6.5 {range} -body {
+    range 10 0
+} -returnCodes error -result {Invalid (infinite?) range specified}
+
+test range-6.6 {range} -body {
+    range 2 4 0
+} -returnCodes error -result {Invalid (infinite?) range specified}
+
+test range-6.7 {range} -body {
+    range 2 4 -2
+} -returnCodes error -result {Invalid (infinite?) range specified}
 
 ################################################################################
 # SCOPE
@@ -3470,6 +3532,45 @@ test rand-1.2 {Check limits} {
 } {200}
 
 catch {unset sum; unset err; unset i}
+
+################################################################################
+# ENV
+################################################################################
+test env-1.1 {env} -body {
+    env abc def ghi
+} -returnCodes error -result {wrong # args: should be "env varName ?default?"}
+
+test env-1.2 {env} -body {
+    env DOES_NOT_EXIST abc
+} -result {abc}
+
+test env-1.3 {env} -body {
+    env DOES_NOT_EXIST
+} -returnCodes error -result {environment variable "DOES_NOT_EXIST" does not exist}
+
+################################################################################
+# READDIR
+################################################################################
+test readdir-1.1 {readdir usage} -body {
+    readdir
+} -returnCodes error -result {wrong # args: should be "readdir ?-nocomplain? dirPath"}
+
+test readdir-1.2 {readdir basic} -body {
+    expr {"jim.test" in [readdir [file dirname [info script]]]}
+} -result {1}
+
+test readdir-1.3 {readdir basic} -body {
+    expr {"jim.test" in [readdir -nocomplain [file dirname [info script]]]}
+} -result {1}
+
+test readdir-1.4 {readdir errors} -body {
+    readdir nonexistent
+} -returnCodes error -result {No such file or directory}
+
+test readdir-1.4 {readdir -nocomplain} -body {
+    readdir -nocomplain nonexistent
+} -result {}
+
 
 ################################################################################
 # JIM REGRESSION TESTS

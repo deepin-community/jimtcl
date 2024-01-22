@@ -1,20 +1,18 @@
-From: Didier Raboud <odyx@debian.org>
-Date: Thu, 21 Nov 2019 10:37:32 +0100
-Subject: Disable RPATH support in Debian builds
+From: Didier Raboud <odyx@debian.org> 
+Date: Wed, 23 Mar 2022 20:21:59 +0800
+Subject: Disable-RPATH-support-in-Debian-builds
 
 ---
- auto.def | 7 ++-----
- 1 file changed, 2 insertions(+), 5 deletions(-)
+ auto.def | 2 ++
+ 1 file changed, 2 insertions(+)
 
-diff --git a/auto.def b/auto.def
-index fe6e4a2..3a3216b 100644
 --- a/auto.def
 +++ b/auto.def
-@@ -314,11 +314,8 @@ if {[opt-bool shared with-jim-shared]} {
+@@ -478,11 +478,8 @@
  }
  define VERSION [format %.2f [expr {[get-define JIM_VERSION] / 100.0}]]
  define LIBSOEXT [format [get-define SH_SOEXTVER] [get-define VERSION]]
--if {[get-define libdir] ni {/lib /usr/lib}} {
+-if {[get-define libdir] ni {/lib /usr/lib /usr/lib64}} {
 -    define SH_LINKRPATH_FLAGS [format [get-define SH_LINKRPATH] [get-define libdir]]
 -} else {
 -    define SH_LINKRPATH_FLAGS ""

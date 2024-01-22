@@ -1,14 +1,50 @@
-jimtcl (0.79+dfsg0.1-1+dde) UNRELEASED; urgency=medium
+jimtcl (0.82-4) unstable; urgency=medium
 
-  * update
+  * upload to unstable 
 
- -- Debian QA Group <packages@qa.debian.org>  Wed, 27 Jul 2022 09:36:18 +0800
+ -- Bo YU <tsu.yubo@gmail.com>  Mon, 04 Sep 2023 15:57:50 +0800
 
-jimtcl (0.79+dfsg0.1-1+dde) unstable; urgency=medium
+jimtcl (0.82-3) experimental; urgency=medium
 
-  * add sw64 porting.
+  * increase time to fix test caes failed
+  * Set _FILE_OFFSET_BITS=64 to fix ftbfs issues on some 32 
+    bit systems
 
- -- Zhang FeiLong <zhangfeilong@uniontech.com>  Mon, 23 May 2022 17:58:41 +0800
+ -- Bo YU <tsu.yubo@gmail.com>  Wed, 23 Aug 2023 23:48:32 +0800
+
+jimtcl (0.82-2) experimental; urgency=medium
+
+  * fix ftbfs on 32 bit systems.
+
+ -- Bo YU <tsu.yubo@gmail.com>  Tue, 04 Jul 2023 21:08:43 +0800
+
+jimtcl (0.82-1) experimental; urgency=medium
+
+  * New upstream release.
+  * set --full default build options from upstream.(Closes: #1016657)
+  * update symbols file
+  * add libssl-dev,pkg-config on B-D
+  * disable network access test from ssl.test
+
+ -- Bo YU <tsu.yubo@gmail.com>  Sun, 28 May 2023 21:22:40 +0800
+
+jimtcl (0.81+dfsg0-2) unstable; urgency=medium
+
+  * fix vcs url.
+  * upload to unstable
+
+ -- Bo YU <tsu.yubo@gmail.com>  Sat, 28 May 2022 15:35:15 +0800
+
+jimtcl (0.81+dfsg0-1) experimental; urgency=medium
+
+  * Update to new upstream version 0.81
+    - Bump libjim SONAME from 0.79 to 0.81
+    - Rebase pacthes; drop upstream backports
+    - Add debian/watch file
+
+  * Add myself as maintainer (Closes: #993599).
+
+ -- Bo YU <tsu.yubo@gmail.com>  Tue, 22 Mar 2022 10:15:19 +0800
 
 jimtcl (0.79+dfsg0-3) unstable; urgency=medium
 

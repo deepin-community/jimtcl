@@ -65,13 +65,28 @@ static int history_cmd_show(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
     return JIM_OK;
 }
 
+static int history_cmd_keep(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    long len;
+    if (argc == 1) {
+        if (Jim_GetLong(interp, argv[0], &len) != JIM_OK) {
+            return JIM_ERR;
+        }
+        Jim_HistorySetMaxLen(len);
+    }
+    else {
+        Jim_SetResultInt(interp, Jim_HistoryGetMaxLen());
+    }
+    return JIM_OK;
+}
+
 static const jim_subcmd_type history_command_table[] = {
-    {   "getline",
-        "prompt ?varname?",
-        history_cmd_getline,
+    {   "add",
+        "line",
+        history_cmd_add,
         1,
-        2,
-        /* Description: Reads one line from the user. Similar to gets. */
+        1,
+        /* Description: Adds the line to the history ands saves */
     },
     {   "completion",
         "command",
@@ -79,6 +94,20 @@ static const jim_subcmd_type history_command_table[] = {
         1,
         1,
         /* Description: Sets an autocompletion callback command, or none if "" */
+    },
+    {   "getline",
+        "prompt ?varname?",
+        history_cmd_getline,
+        1,
+        2,
+        /* Description: Reads one line from the user. Similar to gets. */
+    },
+    {   "keep",
+        "?count?",
+        history_cmd_keep,
+        0,
+        1,
+        /* Description: Set or display the max history length */
     },
     {   "load",
         "filename",
@@ -94,13 +123,6 @@ static const jim_subcmd_type history_command_table[] = {
         1,
         /* Description: Saves history to the given file */
     },
-    {   "add",
-        "line",
-        history_cmd_add,
-        1,
-        1,
-        /* Description: Adds the line to the history ands saves */
-    },
     {   "show",
         NULL,
         history_cmd_show,
@@ -113,9 +135,7 @@ static const jim_subcmd_type history_command_table[] = {
 
 int Jim_historyInit(Jim_Interp *interp)
 {
-    if (Jim_PackageProvide(interp, "history", "1.0", JIM_ERRMSG))
-        return JIM_ERR;
-
+    Jim_PackageProvideCheck(interp, "history");
     Jim_CreateCommand(interp, "history", Jim_SubCmdProc, (void *)history_command_table, NULL);
     return JIM_OK;
 }

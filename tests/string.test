@@ -116,6 +116,15 @@ test string-2.28 {string equal with length, unequal strings} {
 test string-2.29 {string equal with length, unequal strings} {
     string compare -length 2 ab abde
 } 0
+test string-2.30 {string compare - bytes vs chars} {
+    string compare abcd\u1000\u1100\u1200x abcd\u1000\u1100\u1200y
+} -1
+test string-2.31 {string compare - embedded nulls} {
+    string compare ab\0ghi0 ab\0ghi1
+} -1
+test string-2.31 {string compare - embedded nulls, nocase} {
+    string compare -nocase ab\0ghi0 AB\0GHi1
+} -1
 # only need a few tests on equal, since it uses the same code as
 # string compare, but just modifies the return output
 test string-3.1 {string equal} {
@@ -440,6 +449,9 @@ test string-7.5 {string last} {
 test string-7.6 {string last} {
     string las x xxxx123xx345x678
 } 12
+test string-7.7 {string last, bad index} {
+    string last ba badbad -1
+} -1
 test string-7.13 {string last, start index} {
     ## Constrain to last 'a' should work
     string last ba badbad end-1
@@ -521,6 +533,18 @@ test string-10.16 {string map, one pair case} {
 test string-10.17 {string map, one pair case} {
     string map {Ab 4321} aAbCaBaAbAbcAb
 } {a4321CaBa43214321c4321}
+test string-10.18 {string map, nulls in string} {
+    string map {a bc} ade\0ghia\0jkl
+} "bcde\0ghibc\0jkl"
+test string-10.19 {string map, nulls in map source} {
+    string map {\0 bc} ade\0ghia\0jkl
+} "adebcghiabcjkl"
+test string-10.20 {string map, nulls in map dest} {
+    string map {a A\0A} adeghiajkl
+} "A\0AdeghiA\0Ajkl"
+test string-10.21 {string map, null bytes} {
+    string map "\u0000afternull #" foo\u0000afternull\u0000123456789bar
+} foo#\u0000123456789bar
 
 test string-11.1 {string match, too few args} {
     list [catch {string match a} msg]
@@ -675,6 +699,17 @@ test string-11.50 {string match, *special case} tcl {
     string match "\\" "\\"
 } 0
 
+test string-11.51 {string match, nulls in pattern} {
+    string match "abc\0def" "abc\0def"
+} 1
+
+test string-11.52 {string match, nulls in pattern} {
+    string match "abc*\0def" "abcghi\0def"
+} 1
+
+test string-11.53 {string match, nulls in pattern} {
+    string match "abc\[ghi\0]def" "abc\0def"
+} 1
 
 test string-12.1 {string range} {
     list [catch {string range} msg]
@@ -802,10 +837,10 @@ test string-14.12 {string replace} {
 } {}
 test string-14.13 {string replace} {
     list [catch {string replace abc abc 1} msg] $msg
-} {1 {bad index "abc": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "abc": must be intexpr or end?[+-]intexpr?}}
 test string-14.14 {string replace} {
     list [catch {string replace abc 1 eof} msg] $msg
-} {1 {bad index "eof": must be integer?[+-]integer? or end?[+-]integer?}}
+} {1 {bad index "eof": must be intexpr or end?[+-]intexpr?}}
 test string-14.15 {string replace} {
     string replace abcdefghijklmnop end-10 end-2 NEW
 } {abcdeNEWop}
@@ -955,5 +990,45 @@ test string-23.4 {string cat} {
     set abc 123
     string cat $abc (def)
 } {123(def)}
+
+test string-24.1 {string byterange} {
+    list [catch {string byterange} msg]
+} {1}
+test string-24.2 {string byterange} {
+    list [catch {string byterange a 1} msg]
+} {1}
+test string-24.3 {string byterange} {
+    list [catch {string byterange a 1 2 3} msg]
+} {1}
+test string-24.4 {string byterange} {
+    string byterange abcdefghijklmnop 2 14
+} {cdefghijklmno}
+test string-24.5 {string byterange, last > length} {
+    string byterange abcdefghijklmnop 7 1000
+} {hijklmnop}
+test string-24.6 {string byterange} {
+    string byterange abcdefghijklmnop 10 end
+} {klmnop}
+test string-24.7 {string byterange, last < first} {
+    string byterange abcdefghijklmnop 10 9
+} {}
+test string-24.8 {string byterange, first < 0} {
+    string byterange abcdefghijklmnop -3 2
+} {abc}
+test string-24.9 {string byterange} {
+    string byterange abcdefghijklmnop -3 -2
+} {}
+test string-24.10 {string byterange, utf8} {
+    string byterange \u00b5\u00b6 0 1
+} \u00b5
+test string-24.11 {string byterange, slice utf8 } {
+    string byterange \u00b5\u00b6 1 2
+} \xb5\xc2
+test string-24.12 {string byterange, full range} {
+    string byterange abcdef 0 end
+} abcdef
+test string-24.13 {string byterange, invalid range} -body {
+    string byterange abcdef foo bar
+} -returnCodes error -result {bad index "foo": must be intexpr or end?[+-]intexpr?}
 
 testreport

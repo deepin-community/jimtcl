@@ -70,10 +70,10 @@ test expr-1.2 {TclCompileExprCmd: one expression word} {
     expr -25
 } -25
 test expr-1.3 {TclCompileExprCmd: two expression words} {
-    expr -8.2   -6
+    expr {-8.2   -6}
 } -14.2
 test expr-1.4 {TclCompileExprCmd: five expression words} {
-    expr 20 - 5 +10 -7
+    expr {20 - 5 +10 -7}
 } 18
 test expr-1.5 {TclCompileExprCmd: quoted expression word} {
     expr "0005"
@@ -111,7 +111,7 @@ test expr-1.13 {TclCompileExprCmd: second level of substitutions in expr not in 
 } foo
 test expr-1.14 {TclCompileExprCmd: second level of substitutions in expr with comparison as top-level operator} {
     set a xxx
-    set x 2;  set b {$x};  set a [expr $b == 2]
+    set x 2;  set b {$x};  set a [expr "$b == 2"]
     set a
 } 1
 
@@ -260,6 +260,28 @@ test expr-8.10 {CompileEqualityExpr: error compiling equality arm} {
 test expr-8.11 {CompileEqualityExpr: error compiling equality arm} {
     catch {expr 2!=x} msg
 } {1}
+
+
+test expr-8.36 {CompileEqualtyExpr: string comparison ops} {
+    set x 012
+    set y 0x0
+    list [expr {$x < $y}] [expr {$x lt $y}] [expr {$x lt $x}]
+} {0 1 0}
+test expr-8.37 {CompileEqualtyExpr: string comparison ops} {
+    set x 012
+    set y 0x0
+    list [expr {$x <= $y}] [expr {$x le $y}] [expr {$x le $x}]
+} {0 1 1}
+test expr-8.38 {CompileEqualtyExpr: string comparison ops} {
+    set x 012
+    set y 0x0
+    list [expr {$x > $y}] [expr {$x gt $y}] [expr {$x gt $x}]
+} {1 0 0}
+test expr-8.39 {CompileEqualtyExpr: string comparison ops} {
+    set x 012
+    set y 0x0
+    list [expr {$x >= $y}] [expr {$x ge $y}] [expr {$x ge $x}]
+} {1 0 1}
 
 
 test expr-9.1 {CompileRelationalExpr: just shift expr} {expr 3<<2} 12
@@ -626,6 +648,89 @@ test expr-21.7 {checking boolean mixed case} {
     set res 1
   }
 } 1
+
+# This test won't fail if shimmering isn't handled
+# correctly, but it will leak memory. configure with --maintainer
+# to see the issue.
+test expr-21.1 {expr shimmering} {
+  set x {[a] + 2}
+  proc a {} {
+    upvar x x
+    # make the expression become a list while we are executing it
+    lindex $x 2
+  }
+  expr $x
+} {4}
+
+test expr-22.1 {expr} -body {
+    expr {1 + $nonexistent}
+} -returnCodes error -result {can't read "nonexistent": no such variable}
+
+test expr-22.2 {expr} -body {
+    expr {~$nonexistent}
+} -returnCodes error -result {can't read "nonexistent": no such variable}
+
+test expr-22.3 {expr} -body {
+    expr {abs($nonexistent)}
+} -returnCodes error -result {can't read "nonexistent": no such variable}
+
+test expr-22.4 {expr} -body {
+    expr {[nonexistent] << 4}
+} -returnCodes error -result {invalid command name "nonexistent"}
+
+test expr-22.5 {expr} -body {
+    expr {5 >> [nonexistent]}
+} -returnCodes error -result {invalid command name "nonexistent"}
+
+test expr-22.6 {expr} -body {
+    expr {$nonexistent in {a b c}}
+} -returnCodes error -result {can't read "nonexistent": no such variable}
+
+test expr-22.7 {expr} -body {
+    expr {"a" ni $nonexistent}
+} -returnCodes error -result {can't read "nonexistent": no such variable}
+
+test expr-22.8 {expr} -body {
+    expr {5 + $}
+} -returnCodes error -result {syntax error in expression: "5 + $"}
+
+test expr-22.9 {expr} -body {
+    expr {. + 1}
+} -returnCodes error -result {syntax error in expression: ". + 1"}
+
+test expr-22.10 {expr} -body {
+    expr {5 + ,}
+} -returnCodes error -result {unexpected comma in expression: "5 + ,"}
+
+test expr-22.11 {expr} -body {
+    expr {round(1,2,3,4)}
+} -returnCodes error -result {too many arguments to math function}
+
+test expr-22.12 {expr} {
+    expr {inf}
+} {Inf}
+
+test expr-23.1 {expr TIP 582 comments} {
+    expr {1 + # comment on line 1
+    2}
+} {3}
+
+test expr-23.2 {expr TIP 582 comments} {
+    expr {1 +
+        # comment on line 2
+        2
+    }
+} {3}
+
+test expr-23.3 {expr TIP 582 comments} {
+    expr {1 +
+        # Multiple lines
+        # of comments
+        2
+    }
+} {3}
+
+
 
 # cleanup
 if {[info exists a]} {
