@@ -46,6 +46,11 @@ static void signal_ignorer(int sig)
     sigsignored |= sig_to_bit(sig);
 }
 
+void Jim_SignalSetIgnored(jim_wide mask)
+{
+    sigsignored |= mask;
+}
+
 static void signal_init_names(void)
 {
 #define SET_SIG_NAME(SIG) siginfo[SIG].name = #SIG
@@ -293,7 +298,7 @@ static int signal_cmd_check(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
             int sig = find_signal_by_name(interp, Jim_String(argv[i]));
 
             if (sig < 0 || sig >= MAX_SIGNALS) {
-                return -1;
+                return JIM_ERR;
             }
             mask |= sig_to_bit(sig);
         }
@@ -530,9 +535,7 @@ static int Jim_KillCmd(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 
 int Jim_signalInit(Jim_Interp *interp)
 {
-    if (Jim_PackageProvide(interp, "signal", "1.0", JIM_ERRMSG))
-        return JIM_ERR;
-
+    Jim_PackageProvideCheck(interp, "signal");
     Jim_CreateCommand(interp, "alarm", Jim_AlarmCmd, 0, 0);
     Jim_CreateCommand(interp, "kill", Jim_KillCmd, 0, 0);
     /* Sleep is slightly dubious here */

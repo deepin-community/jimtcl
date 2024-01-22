@@ -102,7 +102,6 @@ typedef struct Jim_EventLoop
     Jim_FileEvent *fileEventHead;
     Jim_TimeEvent *timeEventHead;
     jim_wide timeEventNextId;   /* highest event id created, starting at 1 */
-    time_t timeBase;
     int suppress_bgerror; /* bgerror returned break, so don't call it again */
 } Jim_EventLoop;
 
@@ -148,6 +147,16 @@ int Jim_EvalObjBackground(Jim_Interp *interp, Jim_Obj *scriptObjPtr)
 }
 
 
+/**
+ * Register a file event handler on the given file descriptor with the given mask
+ * (may be 1 or more of JIM_EVENT_xxx)
+ *
+ * When the event occurs, proc is called with clientData and the mask of events that occurred.
+ * When the filehandler is removed, finalizerProc is called.
+ *
+ * Note that no check is made that only one handler is registered for the given
+ * event(s).
+ */
 void Jim_CreateFileHandler(Jim_Interp *interp, int fd, int mask,
     Jim_FileProc * proc, void *clientData, Jim_EventFinalizerProc * finalizerProc)
 {
@@ -162,6 +171,45 @@ void Jim_CreateFileHandler(Jim_Interp *interp, int fd, int mask,
     fe->clientData = clientData;
     fe->next = eventLoop->fileEventHead;
     eventLoop->fileEventHead = fe;
+}
+
+static int JimEventHandlerScript(Jim_Interp *interp, void *clientData, int mask)
+{
+    return Jim_EvalObjBackground(interp, (Jim_Obj *)clientData);
+}
+
+static void JimEventHandlerScriptFinalize(Jim_Interp *interp, void *clientData)
+{
+    Jim_DecrRefCount(interp, (Jim_Obj *)clientData);
+}
+
+/**
+ * A convenience version of Jim_CreateFileHandler() which evaluates
+ * scriptObj with Jim_EvalObjBackground() when the event occurs.
+ */
+void Jim_CreateScriptFileHandler(Jim_Interp *interp, int fd, int mask,
+    Jim_Obj *scriptObj)
+{
+    Jim_IncrRefCount(scriptObj);
+    Jim_CreateFileHandler(interp, fd, mask, JimEventHandlerScript, scriptObj, JimEventHandlerScriptFinalize);
+}
+
+/**
+ * If there is a file handler registered with the given mask, return the clientData
+ * for the (first) handler.
+ * Otherwise return NULL.
+ */
+void *Jim_FindFileHandler(Jim_Interp *interp, int fd, int mask)
+{
+    Jim_FileEvent *fe;
+    Jim_EventLoop *eventLoop = Jim_GetAssocData(interp, "eventloop");
+
+    for (fe = eventLoop->fileEventHead; fe; fe = fe->next) {
+        if (fe->fd == fd && (fe->mask & mask)) {
+            return fe->clientData;
+        }
+    }
+    return NULL;
 }
 
 /**
@@ -189,31 +237,6 @@ void Jim_DeleteFileHandler(Jim_Interp *interp, int fd, int mask)
     }
 }
 
-/**
- * Returns the time since interp creation in microseconds.
- */
-static jim_wide JimGetTimeUsec(Jim_EventLoop *eventLoop)
-{
-    long long now;
-    struct timeval tv;
-
-#if defined(HAVE_CLOCK_GETTIME) && defined(CLOCK_MONOTONIC_RAW)
-    struct timespec ts;
-
-    if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) == 0) {
-        now = ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
-    }
-    else
-#endif
-    {
-        gettimeofday(&tv, NULL);
-
-        now = tv.tv_sec * 1000000LL + tv.tv_usec;
-    }
-
-    return now - eventLoop->timeBase;
-}
-
 jim_wide Jim_CreateTimeHandler(Jim_Interp *interp, jim_wide us,
     Jim_TimeProc * proc, void *clientData, Jim_EventFinalizerProc * finalizerProc)
 {
@@ -224,7 +247,7 @@ jim_wide Jim_CreateTimeHandler(Jim_Interp *interp, jim_wide us,
     te = Jim_Alloc(sizeof(*te));
     te->id = id;
     te->initialus = us;
-    te->when = JimGetTimeUsec(eventLoop) + us;
+    te->when = Jim_GetTimeUsec(CLOCK_MONOTONIC_RAW) + us;
     te->timeProc = proc;
     te->finalizerProc = finalizerProc;
     te->clientData = clientData;
@@ -325,7 +348,7 @@ jim_wide Jim_DeleteTimeHandler(Jim_Interp *interp, jim_wide id)
     if (te) {
         jim_wide remain;
 
-        remain = te->when - JimGetTimeUsec(eventLoop);
+        remain = te->when - Jim_GetTimeUsec(CLOCK_MONOTONIC_RAW);
         remain = (remain < 0) ? 0 : remain;
 
         Jim_FreeTimeHandler(interp, te);
@@ -383,7 +406,7 @@ int Jim_ProcessEvents(Jim_Interp *interp, int flags)
 
             /* Calculate the time missing for the nearest
              * timer to fire. */
-            sleep_us = shortest->when - JimGetTimeUsec(eventLoop);
+            sleep_us = shortest->when - Jim_GetTimeUsec(CLOCK_MONOTONIC_RAW);
             if (sleep_us < 0) {
                 sleep_us = 0;
             }
@@ -485,7 +508,7 @@ int Jim_ProcessEvents(Jim_Interp *interp, int flags)
             te = te->next;
             continue;
         }
-        if (JimGetTimeUsec(eventLoop) >= te->when) {
+        if (Jim_GetTimeUsec(CLOCK_MONOTONIC_RAW) >= te->when) {
             id = te->id;
             /* Remove from the list before executing */
             Jim_RemoveTimeHandler(eventLoop, id);
@@ -543,13 +566,18 @@ static int JimELVwaitCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
     Jim_EventLoop *eventLoop = Jim_CmdPrivData(interp);
     Jim_Obj *oldValue;
     int rc;
+    int signal = 0;
 
-    if (argc != 2) {
-        Jim_WrongNumArgs(interp, 1, argv, "name");
+    if (argc == 3 && Jim_CompareStringImmediate(interp, argv[1], "-signal")) {
+        signal++;
+    }
+
+    if (argc - signal != 2) {
+        Jim_WrongNumArgs(interp, 1, argv, "?-signal? name");
         return JIM_ERR;
     }
 
-    oldValue = Jim_GetGlobalVariable(interp, argv[1], JIM_NONE);
+    oldValue = Jim_GetGlobalVariable(interp, argv[1 + signal], JIM_NONE);
     if (oldValue) {
         Jim_IncrRefCount(oldValue);
     }
@@ -563,6 +591,18 @@ static int JimELVwaitCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
     eventLoop->suppress_bgerror = 0;
 
     while ((rc = Jim_ProcessEvents(interp, JIM_ALL_EVENTS)) >= 0) {
+        if (signal && interp->sigmask) {
+            /* vwait -signal and handled signals were received, so transfer them
+             * to ignored signals so that 'signal check -clear' will return them.
+             * It's possible that if signals aren't supported we shouldn't even
+             * allow the -signal option.
+             */
+#ifdef jim_ext_signal
+            Jim_SignalSetIgnored(interp->sigmask);
+#endif
+            interp->sigmask = 0;
+            break;
+        }
         Jim_Obj *currValue;
         currValue = Jim_GetGlobalVariable(interp, argv[1], JIM_NONE);
         /* Stop the loop if the vwait-ed variable changed value,
@@ -745,8 +785,7 @@ int Jim_eventloopInit(Jim_Interp *interp)
 {
     Jim_EventLoop *eventLoop;
 
-    if (Jim_PackageProvide(interp, "eventloop", "1.0", JIM_ERRMSG))
-        return JIM_ERR;
+    Jim_PackageProvideCheck(interp, "eventloop");
 
     eventLoop = Jim_Alloc(sizeof(*eventLoop));
     memset(eventLoop, 0, sizeof(*eventLoop));

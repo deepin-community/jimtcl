@@ -22,7 +22,6 @@ proc class {classname {baseclasses {}} classvars} {
 
 	# Merge in the baseclass vars with lower precedence
 	set classvars [dict merge $baseclassvars $classvars]
-	set vars [lsort [dict keys $classvars]]
 
 	# This is the class dispatcher for $classname
 	# It simply dispatches 'classname cmd' to a procedure named {classname cmd}
@@ -35,13 +34,11 @@ proc class {classname {baseclasses {}} classvars} {
 	}
 
 	# Constructor
-	proc "$classname new" {{instvars {}}} {classname classvars} {
-		set instvars [dict merge $classvars $instvars]
-
+	proc "$classname new" {args} {classname classvars} {
 		# This is the object dispatcher for $classname.
 		# Store the classname in both the ref value and tag, for debugging
-		# ref tag (for debugging)
-		set obj [ref $classname $classname "$classname finalize"]
+		set obj ::[ref $classname $classname "$classname finalize"]
+		set instvars $classvars
 		proc $obj {method args} {classname instvars} {
 			if {![exists -command "$classname $method"]} {
 				if {![exists -command "$classname unknown"]} {
@@ -51,9 +48,7 @@ proc class {classname {baseclasses {}} classvars} {
 			}
 			"$classname $method" {*}$args
 		}
-		if {[exists -command "$classname constructor"]} {
-			$obj constructor
-		}
+		$obj constructor {*}$args
 		return $obj
 	}
 	# Finalizer to invoke destructor during garbage collection
@@ -69,12 +64,12 @@ proc class {classname {baseclasses {}} classvars} {
 			# Note that we can't use 'dict with' here because
 			# the dict isn't updated until the body completes.
 			foreach __ [$self vars] {upvar 1 instvars($__) $__}
-			unset __
+			unset -nocomplain __
 			eval $__body
 		}
 	}
 	# Other simple class procs
-	proc "$classname vars" {} vars { return $vars }
+	proc "$classname vars" {} classvars { lsort [dict keys $classvars] }
 	proc "$classname classvars" {} classvars { return $classvars }
 	proc "$classname classname" {} classname { return $classname }
 	proc "$classname methods" {} classname {
@@ -82,12 +77,24 @@ proc class {classname {baseclasses {}} classvars} {
 			lindex [split $p " "] 1
 		}]
 	}
-	# Pre-defined some instance methods
+	# Pre-define some instance methods
+	$classname method defaultconstructor {{__vars {}}} {
+		set __classvars [$self classvars]
+		foreach __v [dict keys $__vars] {
+			if {![dict exists $__classvars $__v]} {
+				# level 3 because defaultconstructor is called by new
+				return -code error -level 3 "[lindex [info level 0] 0], $__v is not a class variable"
+			}
+			set $__v [dict get $__vars $__v]
+		}
+	}
+	alias "$classname constructor" "$classname defaultconstructor"
 	$classname method destroy {} { rename $self "" }
 	$classname method get {var} { set $var }
-	$classname method eval {{locals {}} __code} {
-		foreach var $locals { upvar 2 $var $var }
-		eval $__code
+	$classname method eval {{__locals {}} __body} {
+		foreach __ $__locals { upvar 2 $__ $__ }
+		unset -nocomplain __
+		eval $__body
 	}
 	return $classname
 }
@@ -95,6 +102,7 @@ proc class {classname {baseclasses {}} classvars} {
 # From within a method, invokes the given method on the base class.
 # Note that this will only call the last baseclass given
 proc super {method args} {
-	upvar self self
-	uplevel 2 [$self baseclass] $method {*}$args
+	# If we are called from "class method", we want to call "[$class baseclass] method"
+	set classname [lindex [info level -1] 0 0]
+	uplevel 2 [list [$classname baseclass] $method {*}$args]
 }

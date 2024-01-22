@@ -114,6 +114,18 @@ test dict-5.2 {Dict with} {
 	}
 	dictsort [a]
 } {a B}
+test dict-5.3 {Dict with return value} {
+	proc a {} {
+		set x [dict create a b c d]
+		dict with x {
+			set a B
+			unset c
+			# dict with should return the script return value
+			set retvalue ok
+		}
+	}
+	a
+} {ok}
 
 test dict-22.1 {dict with command} {
     list [catch {dict with} msg] $msg
@@ -248,5 +260,148 @@ test dict-24.4 {dict/list shimmering with lappend and foreach} {
 	}
 	llength $a
 } 12
+
+# As of 0.79, dicts maintain insertion order
+test dict-25.1 {dict ordering} {
+	dict keys {a x 0 y}
+} {a 0}
+
+test dict-25.2 {dict ordering} {
+	dict keys {0 x a y}
+} {0 a}
+
+test dict-25.3 {dict ordering} {
+	set d [dict create a y 0 x 2 z]
+	dict set d 1 w
+	dict keys $d
+} {a 0 2 1}
+
+test dict-25.3 {dict ordering} {
+	set d [dict create a y 0 x 2 z]
+	dict set d 0 w
+	dict keys $d
+} {a 0 2}
+
+test dict-25.4 {removal of keys that hash earlier} {
+	set parsed {formPost {text {This is text.} {text file} Hello. {image file} abc}}
+
+	dict unset parsed formPost text
+	dict unset parsed formPost {image file}
+	dict get $parsed formPost {text file}
+} Hello.
+
+test dict-25.5 {list to dict, duplicate keys} {
+	set l [list a 1 a 2 a 3]
+	# make sure there is no string rep
+	lappend l b 4
+	dict get $l a
+} {3}
+
+# Follow Tcl, to force interpretation, not compilation.
+# No effect in Jim
+set dict dict
+test dict-26.1 {dict getdef command} -body {
+    dict getdef {a b} a c
+} -result b
+test dict-26.2 {dict getdef command} -body {
+    dict getdef {a b} b c
+} -result c
+test dict-26.3 {dict getdef command} -body {
+    dict getdef {a {b c}} a b d
+} -result c
+test dict-26.4 {dict getdef command} -body {
+    dict getdef {a {b c}} a c d
+} -result d
+test dict-26.5 {dict getdef command} -body {
+    dict getdef {a {b c}} b c d
+} -result d
+test dict-26.6 {dict getdef command} -returnCodes error -body {
+    dict getdef {a {b c d}} a b d
+} -result {missing value to go with key}
+test dict-26.7 {dict getdef command} -returnCodes error -body {
+    dict getdef
+} -result {wrong # args: should be "dict getdef dictionary ?key ...? key default"}
+test dict-26.8 {dict getdef command} -returnCodes error -body {
+    dict getdef {}
+} -result {wrong # args: should be "dict getdef dictionary ?key ...? key default"}
+test dict-26.9 {dict getdef command} -returnCodes error -body {
+    dict getdef {} {}
+} -result {wrong # args: should be "dict getdef dictionary ?key ...? key default"}
+test dict-26.10 {dict getdef command} -returnCodes error -body {
+    dict getdef {a b c} d e
+} -result {missing value to go with key}
+test dict-26.11 {dict getdef command} -body {
+    $dict getdef {a b} a c
+} -result b
+test dict-26.12 {dict getdef command} -body {
+    $dict getdef {a b} b c
+} -result c
+test dict-26.13 {dict getdef command} -body {
+    $dict getdef {a {b c}} a b d
+} -result c
+test dict-26.14 {dict getdef command} -body {
+    $dict getdef {a {b c}} a c d
+} -result d
+test dict-26.15 {dict getdef command} -body {
+    $dict getdef {a {b c}} b c d
+} -result d
+test dict-26.16 {dict getdef command} -returnCodes error -body {
+    $dict getdef {a {b c d}} a b d
+} -result {missing value to go with key}
+test dict-26.17 {dict getdef command} -returnCodes error -body {
+    $dict getdef {a b c} d e
+} -result {missing value to go with key}
+
+test dict-27.1 {dict getwithdefault command} -body {
+    dict getwithdefault {a b} a c
+} -result b
+test dict-27.2 {dict getwithdefault command} -body {
+    dict getwithdefault {a b} b c
+} -result c
+test dict-27.3 {dict getwithdefault command} -body {
+    dict getwithdefault {a {b c}} a b d
+} -result c
+test dict-27.4 {dict getwithdefault command} -body {
+    dict getwithdefault {a {b c}} a c d
+} -result d
+test dict-27.5 {dict getwithdefault command} -body {
+    dict getwithdefault {a {b c}} b c d
+} -result d
+test dict-27.6 {dict getwithdefault command} -returnCodes error -body {
+    dict getwithdefault {a {b c d}} a b d
+} -result {missing value to go with key}
+test dict-27.7 {dict getwithdefault command} -returnCodes error -body {
+    dict getwithdefault
+} -result {wrong # args: should be "dict getwithdefault dictionary ?key ...? key default"}
+test dict-27.8 {dict getwithdefault command} -returnCodes error -body {
+    dict getwithdefault {}
+} -result {wrong # args: should be "dict getwithdefault dictionary ?key ...? key default"}
+test dict-27.9 {dict getwithdefault command} -returnCodes error -body {
+    dict getwithdefault {} {}
+} -result {wrong # args: should be "dict getwithdefault dictionary ?key ...? key default"}
+test dict-27.10 {dict getdef command} -returnCodes error -body {
+    dict getwithdefault {a b c} d e
+} -result {missing value to go with key}
+test dict-27.11 {dict getwithdefault command} -body {
+    $dict getwithdefault {a b} a c
+} -result b
+test dict-27.12 {dict getwithdefault command} -body {
+    $dict getwithdefault {a b} b c
+} -result c
+test dict-27.13 {dict getwithdefault command} -body {
+    $dict getwithdefault {a {b c}} a b d
+} -result c
+test dict-27.14 {dict getwithdefault command} -body {
+    $dict getwithdefault {a {b c}} a c d
+} -result d
+test dict-27.15 {dict getwithdefault command} -body {
+    $dict getwithdefault {a {b c}} b c d
+} -result d
+test dict-27.16 {dict getwithdefault command} -returnCodes error -body {
+    $dict getwithdefault {a {b c d}} a b d
+} -result {missing value to go with key}
+test dict-27.17 {dict getdef command} -returnCodes error -body {
+    $dict getwithdefault {a b c} d e
+} -result {missing value to go with key}
 
 testreport

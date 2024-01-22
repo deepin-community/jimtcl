@@ -1,0 +1,86 @@
+From bbb8545cbe6fda53274d242a78a1c706d51ba93f Mon Sep 17 00:00:00 2001
+From: Steve Bennett <steveb@workware.net.au>
+Date: Mon, 3 Jul 2023 21:36:14 +1000
+Subject: [PATCH] build: define _GNU_SOURCE only on the command line
+
+Not in source files
+
+See https://ariadne.space/2021/12/21/stop-defining-feature-test-macros-in-your-code/
+
+Signed-off-by: Steve Bennett <steveb@workware.net.au>
+---
+ auto.def    |  2 ++
+ jim-aio.c   |  3 ---
+ jim-clock.c | 12 ------------
+ jim-exec.c  |  3 ---
+ jim.c       |  3 ---
+ 5 files changed, 2 insertions(+), 21 deletions(-)
+
+--- a/auto.def
++++ b/auto.def
+@@ -209,6 +209,8 @@
+ # Default optimisation
+ define-append AS_CPPFLAGS -O2
+ 
++define-append AS_CPPFLAGS -D_GNU_SOURCE
++
+ # check, but don't add to -cflags
+ cc-with {} {
+ 	cc-check-flags -fno-unwind-tables -fno-asynchronous-unwind-tables
+--- a/jim-aio.c
++++ b/jim-aio.c
+@@ -39,9 +39,6 @@
+ 
+ #include "jimautoconf.h"
+ 
+-#ifndef _GNU_SOURCE
+-#define _GNU_SOURCE
+-#endif
+ #include <stdio.h>
+ #include <string.h>
+ #include <errno.h>
+--- a/jim-clock.c
++++ b/jim-clock.c
+@@ -6,18 +6,6 @@
+ 
+ #include "jimautoconf.h"
+ 
+-/* For strptime() - currently nothing sets this */
+-#ifdef STRPTIME_NEEDS_XOPEN_SOURCE
+-#ifndef _XOPEN_SOURCE
+-#define _XOPEN_SOURCE 500
+-#endif
+-#endif
+-
+-/* For timegm() */
+-#ifndef _GNU_SOURCE
+-#define _GNU_SOURCE
+-#endif
+-
+ #include <stdlib.h>
+ #include <string.h>
+ #include <stdio.h>
+--- a/jim-exec.c
++++ b/jim-exec.c
+@@ -20,9 +20,6 @@
+  * express or implied warranty.
+  */
+ 
+-#ifndef _GNU_SOURCE
+-#define _GNU_SOURCE
+-#endif
+ #include <string.h>
+ #include <ctype.h>
+ 
+--- a/jim.c
++++ b/jim.c
+@@ -41,9 +41,6 @@
+  * official policies, either expressed or implied, of the Jim Tcl Project.
+  **/
+ #define JIM_OPTIMIZATION        /* comment to avoid optimizations and reduce size */
+-#ifndef _GNU_SOURCE
+-#define _GNU_SOURCE             /* Mostly just for environ */
+-#endif
+ 
+ #include <stdio.h>
+ #include <stdlib.h>

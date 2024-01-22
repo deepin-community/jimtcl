@@ -29,7 +29,7 @@
 #include "jimautoconf.h"
 #include <jim.h>
 
-#if (!defined(HAVE_VFORK) || !defined(HAVE_WAITPID)) && !defined(__MINGW32__)
+#if (!(defined(HAVE_VFORK) || defined(HAVE_FORK)) || !defined(HAVE_WAITPID)) && !defined(__MINGW32__)
 /* Poor man's implementation of exec with system()
  * The system() call *may* do command line redirection, etc.
  * The standard output is not available.
@@ -82,9 +82,7 @@ static int Jim_ExecCmd(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 
 int Jim_execInit(Jim_Interp *interp)
 {
-    if (Jim_PackageProvide(interp, "exec", "1.0", JIM_ERRMSG))
-        return JIM_ERR;
-
+    Jim_PackageProvideCheck(interp, "exec");
     Jim_CreateCommand(interp, "exec", Jim_ExecCmd, NULL, NULL);
     return JIM_OK;
 }
@@ -103,13 +101,13 @@ static char **JimOriginalEnviron(void);
 static char **JimSaveEnv(char **env);
 static void JimRestoreEnv(char **env);
 static int JimCreatePipeline(Jim_Interp *interp, int argc, Jim_Obj *const *argv,
-    pidtype **pidArrayPtr, int *inPipePtr, int *outPipePtr, int *errFilePtr);
-static void JimDetachPids(struct WaitInfoTable *table, int numPids, const pidtype *pidPtr);
-static int JimCleanupChildren(Jim_Interp *interp, int numPids, pidtype *pidPtr, Jim_Obj *errStrObj);
+    phandle_t **pidArrayPtr, int *inPipePtr, int *outPipePtr, int *errFilePtr);
+static void JimDetachPids(struct WaitInfoTable *table, int numPids, const phandle_t *pidPtr);
+static int JimCleanupChildren(Jim_Interp *interp, int numPids, phandle_t *pidPtr, Jim_Obj *errStrObj);
 static int Jim_WaitCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv);
 
 #if defined(__MINGW32__)
-static pidtype JimStartWinProcess(Jim_Interp *interp, char **argv, char **env, int inputId, int outputId, int errorId);
+static phandle_t JimStartWinProcess(Jim_Interp *interp, char **argv, char **env, int inputId, int outputId, int errorId);
 #endif
 
 /*
@@ -232,18 +230,18 @@ static void JimFreeEnv(char **env, char **original_environ)
     }
 }
 
-static Jim_Obj *JimMakeErrorCode(Jim_Interp *interp, pidtype pid, int waitStatus, Jim_Obj *errStrObj)
+static Jim_Obj *JimMakeErrorCode(Jim_Interp *interp, long pid, int waitStatus, Jim_Obj *errStrObj)
 {
     Jim_Obj *errorCode = Jim_NewListObj(interp, NULL, 0);
 
-    if (pid == JIM_BAD_PID || pid == JIM_NO_PID) {
+    if (pid <= 0) {
         Jim_ListAppendElement(interp, errorCode, Jim_NewStringObj(interp, "NONE", -1));
-        Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, (long)pid));
+        Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, pid));
         Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, -1));
     }
     else if (WIFEXITED(waitStatus)) {
         Jim_ListAppendElement(interp, errorCode, Jim_NewStringObj(interp, "CHILDSTATUS", -1));
-        Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, (long)pid));
+        Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, pid));
         Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, WEXITSTATUS(waitStatus)));
     }
     else {
@@ -271,7 +269,7 @@ static Jim_Obj *JimMakeErrorCode(Jim_Interp *interp, pidtype pid, int waitStatus
             Jim_AppendStrings(interp, errStrObj, "child ", action, " by signal ", Jim_SignalId(WTERMSIG(waitStatus)), "\n", NULL);
         }
 
-        Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, (long)pid));
+        Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, pid));
         Jim_ListAppendElement(interp, errorCode, Jim_NewStringObj(interp, signame, -1));
     }
     return errorCode;
@@ -286,7 +284,7 @@ static Jim_Obj *JimMakeErrorCode(Jim_Interp *interp, pidtype pid, int waitStatus
  * Note that $::errorCode is left unchanged for a normal exit.
  * Details of any abnormal exit is appended to the errStrObj, unless it is NULL.
  */
-static int JimCheckWaitStatus(Jim_Interp *interp, pidtype pid, int waitStatus, Jim_Obj *errStrObj)
+static int JimCheckWaitStatus(Jim_Interp *interp, long pid, int waitStatus, Jim_Obj *errStrObj)
 {
     if (WIFEXITED(waitStatus) && WEXITSTATUS(waitStatus) == 0) {
         return JIM_OK;
@@ -303,7 +301,7 @@ static int JimCheckWaitStatus(Jim_Interp *interp, pidtype pid, int waitStatus, J
 
 struct WaitInfo
 {
-    pidtype pid;                /* Process id of child. */
+    phandle_t phandle;          /* Process handle (pid on Unix) of child. */
     int status;                 /* Status returned when child exited or suspended. */
     int flags;                  /* Various flag bits;  see below for definitions. */
 };
@@ -353,13 +351,13 @@ static struct WaitInfoTable *JimAllocWaitInfoTable(void)
  *
  * Returns 0 if OK or -1 if not found.
  */
-static int JimWaitRemove(struct WaitInfoTable *table, pidtype pid)
+static int JimWaitRemove(struct WaitInfoTable *table, phandle_t phandle)
 {
     int i;
 
     /* Find it in the table */
     for (i = 0; i < table->used; i++) {
-        if (pid == table->info[i].pid) {
+        if (phandle == table->info[i].phandle) {
             if (i != table->used - 1) {
                 table->info[i] = table->info[table->used - 1];
             }
@@ -377,7 +375,7 @@ static int Jim_ExecCmd(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
     int outputId;    /* File id for output pipe. -1 means command overrode. */
     int errorId;     /* File id for temporary file containing error output. */
-    pidtype *pidPtr;
+    phandle_t *pidPtr;
     int numPids, result;
     int child_siginfo = 1;
     Jim_Obj *childErrObj;
@@ -400,7 +398,7 @@ static int Jim_ExecCmd(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
         /* The return value is a list of the pids */
         listObj = Jim_NewListObj(interp, NULL, 0);
         for (i = 0; i < numPids; i++) {
-            Jim_ListAppendElement(interp, listObj, Jim_NewIntObj(interp, (long)pidPtr[i]));
+            Jim_ListAppendElement(interp, listObj, Jim_NewIntObj(interp, JimProcessPid(pidPtr[i])));
         }
         Jim_SetResult(interp, listObj);
         JimDetachPids(table, numPids, pidPtr);
@@ -474,22 +472,21 @@ static int Jim_ExecCmd(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 }
 
 /**
- * Does waitpid() on the given pid, and then removes the
+ * Does waitpid() on the given process, and then removes the
  * entry from the wait table.
  *
- * Returns the pid if OK and updates *statusPtr with the status,
- * or JIM_BAD_PID if the pid was not in the table.
+ * Returns the pid of the process if OK and updates *statusPtr with the status,
+ * or -1 if the process was not in the table.
  */
-static pidtype JimWaitForProcess(struct WaitInfoTable *table, pidtype pid, int *statusPtr)
+static long JimWaitForProcess(struct WaitInfoTable *table, phandle_t phandle, int *statusPtr)
 {
-    if (JimWaitRemove(table, pid) == 0) {
+    if (JimWaitRemove(table, phandle) == 0) {
          /* wait for it */
-         waitpid(pid, statusPtr, 0);
-         return pid;
+         return waitpid(phandle, statusPtr, 0);
     }
 
     /* Not found */
-    return JIM_BAD_PID;
+    return -1;
 }
 
 /**
@@ -497,7 +494,7 @@ static pidtype JimWaitForProcess(struct WaitInfoTable *table, pidtype pid, int *
  * background and are no longer cared about.
  * These children can be cleaned up with JimReapDetachedPids().
  */
-static void JimDetachPids(struct WaitInfoTable *table, int numPids, const pidtype *pidPtr)
+static void JimDetachPids(struct WaitInfoTable *table, int numPids, const phandle_t *pidPtr)
 {
     int j;
 
@@ -505,7 +502,7 @@ static void JimDetachPids(struct WaitInfoTable *table, int numPids, const pidtyp
         /* Find it in the table */
         int i;
         for (i = 0; i < table->used; i++) {
-            if (pidPtr[j] == table->info[i].pid) {
+            if (pidPtr[j] == table->info[i].phandle) {
                 table->info[i].flags |= WI_DETACHED;
                 break;
             }
@@ -547,8 +544,8 @@ static void JimReapDetachedPids(struct WaitInfoTable *table)
     for (count = table->used; count > 0; waitPtr++, count--) {
         if (waitPtr->flags & WI_DETACHED) {
             int status;
-            pidtype pid = waitpid(waitPtr->pid, &status, WNOHANG);
-            if (pid == waitPtr->pid) {
+            long pid = waitpid(waitPtr->phandle, &status, WNOHANG);
+            if (pid > 0) {
                 /* Process has exited, so remove it from the table */
                 table->used--;
                 continue;
@@ -590,8 +587,8 @@ static int Jim_WaitCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
     struct WaitInfoTable *table = Jim_CmdPrivData(interp);
     int nohang = 0;
-    pidtype pid;
-    long pidarg;
+    long pid;
+    phandle_t phandle;
     int status;
     Jim_Obj *errCodeObj;
 
@@ -608,17 +605,29 @@ static int Jim_WaitCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
         Jim_WrongNumArgs(interp, 1, argv, "?-nohang? ?pid?");
         return JIM_ERR;
     }
-    if (Jim_GetLong(interp, argv[nohang + 1], &pidarg) != JIM_OK) {
+    if (Jim_GetLong(interp, argv[nohang + 1], &pid) != JIM_OK) {
         return JIM_ERR;
     }
 
-    pid = waitpid((pidtype)pidarg, &status, nohang ? WNOHANG : 0);
+    /* On Windows a processId is passed here, but a process handle is needed for waitpid */
+    phandle = JimWaitPid(pid, &status, nohang ? WNOHANG : 0);
+    if (phandle == JIM_BAD_PHANDLE) {
+        pid = -1;
+    }
+#ifndef __MINGW32__
+    else if (pid < 0) {
+        /* This catches the case where pid=-1. It is only supported on unix where
+         * the returned phandle is a pid, so can simply assign here
+         */
+        pid = phandle;
+    }
+#endif
 
     errCodeObj = JimMakeErrorCode(interp, pid, status, NULL);
 
-    if (pid != JIM_BAD_PID && (WIFEXITED(status) || WIFSIGNALED(status))) {
+    if (phandle != JIM_BAD_PHANDLE && (WIFEXITED(status) || WIFSIGNALED(status))) {
         /* The process has finished. Remove it from the wait table if it exists there */
-        JimWaitRemove(table, pid);
+        JimWaitRemove(table, phandle);
     }
     Jim_SetResult(interp, errCodeObj);
     return JIM_OK;
@@ -664,10 +673,10 @@ static int Jim_PidCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
  *----------------------------------------------------------------------
  */
 static int
-JimCreatePipeline(Jim_Interp *interp, int argc, Jim_Obj *const *argv, pidtype **pidArrayPtr,
+JimCreatePipeline(Jim_Interp *interp, int argc, Jim_Obj *const *argv, phandle_t **pidArrayPtr,
     int *inPipePtr, int *outPipePtr, int *errFilePtr)
 {
-    pidtype *pidPtr = NULL;         /* Points to malloc-ed array holding all
+    phandle_t *pidPtr = NULL;         /* Points to alloc-ed array holding all
                                  * the pids of child processes. */
     int numPids = 0;            /* Actual number of processes that exist
                                  * at *pidPtr right now. */
@@ -723,9 +732,9 @@ JimCreatePipeline(Jim_Interp *interp, int argc, Jim_Obj *const *argv, pidtype **
                                  * current command. */
     int lastBar;
     int i;
-    pidtype pid;
+    phandle_t phandle;
     char **save_environ;
-#ifndef __MINGW32__
+#if defined(HAVE_EXECVPE) && !defined(__MINGW32__)
     char **child_environ;
 #endif
     struct WaitInfoTable *table = Jim_CmdPrivData(interp);
@@ -986,9 +995,6 @@ badargs:
      */
 
     pidPtr = Jim_Alloc(cmdCount * sizeof(*pidPtr));
-    for (i = 0; i < numPids; i++) {
-        pidPtr[i] = JIM_BAD_PID;
-    }
     for (firstArg = 0; firstArg < arg_count; numPids++, firstArg = lastArg + 1) {
         int pipe_dup_err = 0;
         int origErrorId = errorId;
@@ -1030,46 +1036,52 @@ badargs:
         /* Now fork the child */
 
 #ifdef __MINGW32__
-        pid = JimStartWinProcess(interp, &arg_array[firstArg], save_environ, inputId, outputId, errorId);
-        if (pid == JIM_BAD_PID) {
+        phandle = JimStartWinProcess(interp, &arg_array[firstArg], save_environ, inputId, outputId, errorId);
+        if (phandle == JIM_BAD_PHANDLE) {
             Jim_SetResultFormatted(interp, "couldn't exec \"%s\"", arg_array[firstArg]);
             goto error;
         }
 #else
         i = strlen(arg_array[firstArg]);
 
+#ifdef HAVE_EXECVPE
         child_environ = Jim_GetEnviron();
+#endif
         /*
          * Make a new process and enter it into the table if the vfork
          * is successful.
          */
-        pid = vfork();
-        if (pid < 0) {
+#ifdef HAVE_VFORK
+        phandle = vfork();
+#else
+        phandle = fork();
+#endif
+        if (phandle < 0) {
             Jim_SetResultErrno(interp, "couldn't fork child process");
             goto error;
         }
-        if (pid == 0) {
+        if (phandle == 0) {
             /* Child */
             /* Set up stdin, stdout, stderr */
-            if (inputId != -1) {
+            if (inputId != -1 && inputId != fileno(stdin)) {
                 dup2(inputId, fileno(stdin));
                 close(inputId);
             }
-            if (outputId != -1) {
+            if (outputId != -1 && outputId != fileno(stdout)) {
                 dup2(outputId, fileno(stdout));
                 if (outputId != errorId) {
                     close(outputId);
                 }
             }
-            if (errorId != -1) {
+            if (errorId != -1 && errorId != fileno(stderr)) {
                 dup2(errorId, fileno(stderr));
                 close(errorId);
             }
             /* Close parent-only file descriptors */
-            if (outPipePtr) {
+            if (outPipePtr && *outPipePtr != -1) {
                 close(*outPipePtr);
             }
-            if (errFilePtr) {
+            if (errFilePtr && *errFilePtr != -1) {
                 close(*errFilePtr);
             }
             if (pipeIds[0] != -1) {
@@ -1108,11 +1120,11 @@ badargs:
             table->info = Jim_Realloc(table->info, table->size * sizeof(*table->info));
         }
 
-        table->info[table->used].pid = pid;
+        table->info[table->used].phandle = phandle;
         table->info[table->used].flags = 0;
         table->used++;
 
-        pidPtr[numPids] = pid;
+        pidPtr[numPids] = phandle;
 
         /* Restore in case of pipe_dup_err */
         errorId = origErrorId;
@@ -1180,7 +1192,7 @@ badargs:
     }
     if (pidPtr != NULL) {
         for (i = 0; i < numPids; i++) {
-            if (pidPtr[i] != JIM_BAD_PID) {
+            if (pidPtr[i] != JIM_BAD_PHANDLE) {
                 JimDetachPids(table, 1, &pidPtr[i]);
             }
         }
@@ -1210,7 +1222,7 @@ badargs:
  *----------------------------------------------------------------------
  */
 
-static int JimCleanupChildren(Jim_Interp *interp, int numPids, pidtype *pidPtr, Jim_Obj *errStrObj)
+static int JimCleanupChildren(Jim_Interp *interp, int numPids, phandle_t *pidPtr, Jim_Obj *errStrObj)
 {
     struct WaitInfoTable *table = Jim_CmdPrivData(interp);
     int result = JIM_OK;
@@ -1219,8 +1231,9 @@ static int JimCleanupChildren(Jim_Interp *interp, int numPids, pidtype *pidPtr, 
     /* Now check the return status of each child */
     for (i = 0; i < numPids; i++) {
         int waitStatus = 0;
-        if (JimWaitForProcess(table, pidPtr[i], &waitStatus) != JIM_BAD_PID) {
-            if (JimCheckWaitStatus(interp, pidPtr[i], waitStatus, errStrObj) != JIM_OK) {
+        long pid = JimWaitForProcess(table, pidPtr[i], &waitStatus);
+        if (pid > 0) {
+            if (JimCheckWaitStatus(interp, pid, waitStatus, errStrObj) != JIM_OK) {
                 result = JIM_ERR;
             }
         }
@@ -1233,8 +1246,8 @@ static int JimCleanupChildren(Jim_Interp *interp, int numPids, pidtype *pidPtr, 
 int Jim_execInit(Jim_Interp *interp)
 {
     struct WaitInfoTable *waitinfo;
-    if (Jim_PackageProvide(interp, "exec", "1.0", JIM_ERRMSG))
-        return JIM_ERR;
+
+    Jim_PackageProvideCheck(interp, "exec");
 
     waitinfo = JimAllocWaitInfoTable();
     Jim_CreateCommand(interp, "exec", Jim_ExecCmd, waitinfo, JimFreeWaitInfoTable);
@@ -1363,19 +1376,19 @@ JimWinBuildCommandLine(Jim_Interp *interp, char **argv)
 /**
  * Note that inputId, etc. are osf_handles.
  */
-static pidtype
+static phandle_t
 JimStartWinProcess(Jim_Interp *interp, char **argv, char **env, int inputId, int outputId, int errorId)
 {
     STARTUPINFO startInfo;
     PROCESS_INFORMATION procInfo;
     HANDLE hProcess;
     char execPath[MAX_PATH];
-    pidtype pid = JIM_BAD_PID;
+    phandle_t phandle = INVALID_HANDLE_VALUE;
     Jim_Obj *cmdLineObj;
     char *winenv;
 
     if (JimWinFindExecutable(argv[0], execPath) < 0) {
-        return JIM_BAD_PID;
+        return phandle;
     }
     argv[0] = execPath;
 
@@ -1466,7 +1479,7 @@ JimStartWinProcess(Jim_Interp *interp, char **argv, char **env, int inputId, int
     WaitForInputIdle(procInfo.hProcess, 5000);
     CloseHandle(procInfo.hThread);
 
-    pid = procInfo.hProcess;
+    phandle = procInfo.hProcess;
 
     end:
     Jim_FreeNewObj(interp, cmdLineObj);
@@ -1479,7 +1492,7 @@ JimStartWinProcess(Jim_Interp *interp, char **argv, char **env, int inputId, int
     if (startInfo.hStdError != INVALID_HANDLE_VALUE) {
         CloseHandle(startInfo.hStdError);
     }
-    return pid;
+    return phandle;
 }
 
 #else

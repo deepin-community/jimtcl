@@ -95,7 +95,7 @@ test dict-3.10 {dict get command} -returnCodes error -body {
 test dict-3.11 {dict get command} {dict get [dict create a b c d] a} b
 test dict-3.12 {dict get command} -returnCodes error -body {
     dict get
-} -result {wrong # args: should be "dict get dictionary ?key ...?"}
+} -match glob -result {wrong # args: should be "dict get dictionary ?key*?"}
 test dict-3.13 {dict get command} -body {
     set dict [dict get {a b c d}]
     if {$dict eq "a b c d"} {
@@ -316,14 +316,14 @@ test dict-11.9 {dict incr command} -returnCodes error -body {
 	dict-sort $dictv
 } -cleanup {
     unset dictv
-} -result {expected integer but got "dummy"}
+} -match glob -result {expected integer *but got "dummy"}
 test dict-11.10 {dict incr command} -returnCodes error -body {
     set dictv {a 1}
     dict incr dictv a dummy
 	dict-sort $dictv
 } -cleanup {
     unset dictv
-} -result {expected integer but got "dummy"}
+} -match glob -result {expected integer *but got "dummy"}
 test dict-11.11 {dict incr command} -setup {
     unset -nocomplain dictv
 } -body {
@@ -1250,5 +1250,52 @@ test dict-22.11 {dict with command: no recursive structures [Bug 1786481]} -body
 } -cleanup {
     unset foo t inner
 } -result OK
+
+set dictnulls {ab\0c de\0f \0ghi kl\0m}
+set dictgood [array get tcl_platform]
+set dictbad {abc def ghi}
+
+test dict-23.1 {dict info} {
+	regexp {entries in table,.*buckets} [dict info $dictgood]
+} {1}
+
+test dict-23.2 {dict info usage} -body {
+	dict info
+} -returnCodes error -result {wrong # args: should be "dict info dictionary"}
+
+test dict-23.3 {dict info baddict} -body {
+	dict info $dictbad
+} -returnCodes error -result {missing value to go with key}
+
+test dict-23.4 {dict with usage} -body {
+	dict with
+} -returnCodes error -result {wrong # args: should be "dict with dictVar ?key ...? script"}
+
+test dict-23.5 {dict with badvar} -constraints jim -body {
+    proc a {dict} {
+	dict with dict {
+	    lsort [info locals]
+	}
+    }
+    a $dictnulls
+} -returnCodes ok -result [list \0ghi ab\0c dict]
+
+test dict-23.6 {dict with baddict} -body {
+	dict with dictbad {}
+} -returnCodes error -result {missing value to go with key}
+
+test dict-24.1 {dict hash collision} {
+    set d {}
+    # 0,13 and 8,4 product a hash collision
+    # add both
+    dict set d 0,13 X
+    dict set d 8,4 Y
+    # Now remove the first and update the second
+    dict unset d 0,13
+    dict set d 8,4 Z
+    # There should be 1 entry, not 2
+    dict size $d
+} 1
+
 
 testreport

@@ -91,16 +91,17 @@ enum {
 	REG_ERR_NESTED_COUNT,
 	REG_ERR_INTERNAL,
 	REG_ERR_COUNT_FOLLOWS_NOTHING,
-	REG_ERR_TRAILING_BACKSLASH,
+	REG_ERR_INVALID_ESCAPE,
 	REG_ERR_CORRUPTED,
 	REG_ERR_NULL_CHAR,
+	REG_ERR_UNMATCHED_BRACKET,
 	REG_ERR_NUM
 };
 
-int regcomp(regex_t *preg, const char *regex, int cflags);
-int regexec(regex_t  *preg,  const  char *string, size_t nmatch, regmatch_t pmatch[], int eflags);
-size_t regerror(int errcode, const regex_t *preg, char *errbuf,  size_t errbuf_size);
-void regfree(regex_t *preg);
+int jim_regcomp(regex_t *preg, const char *regex, int cflags);
+int jim_regexec(regex_t  *preg,  const  char *string, size_t nmatch, regmatch_t pmatch[], int eflags);
+size_t jim_regerror(int errcode, const regex_t *preg, char *errbuf,  size_t errbuf_size);
+void jim_regfree(regex_t *preg);
 
 #ifdef __cplusplus
 }

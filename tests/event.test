@@ -81,6 +81,19 @@ test event-7.3 {bgerror / accumulation / break} {
     set errRes;
 } err1
 
+# Tcl handles errors in bgerror slightly differently
+# Jim prints the original error to stderr
+test event-7.4 {bgerror throws an error} -constraints jim -body {
+    exec [info nameofexecutable] - << {
+        proc bgerror {err} {
+            error "inside bgerror"
+        }
+        after 0 {error err1}
+        update
+    }
+} -result {stdin:3: Error: inside bgerror
+at file "stdin", line 3}
+
 # end of bgerror tests
 catch {rename bgerror {}}
 
@@ -91,12 +104,12 @@ test event-10.1 {Tcl_Exit procedure} exec {
         [lindex $errorCode 2]
 } {1 CHILDSTATUS 3}
 
-test event-11.1 {Tcl_VwaitCmd procedure} {
-    list [catch {vwait} msg] $msg
-} {1 {wrong # args: should be "vwait name"}}
-test event-11.2 {Tcl_VwaitCmd procedure} {
-    list [catch {vwait a b} msg] $msg
-} {1 {wrong # args: should be "vwait name"}}
+test event-11.1 {Tcl_VwaitCmd procedure} -body {
+    vwait
+} -returnCodes error -match glob -result {wrong # args: should be "vwait* name"}
+test event-11.2 {Tcl_VwaitCmd procedure} -body {
+    vwait a b
+} -returnCodes error -match glob -result {wrong # args: should be "vwait* name"}
 test event-11.3 {Tcl_VwaitCmd procedure} jim {
     catch {unset x}
     set x 1
@@ -185,14 +198,14 @@ test event-12.4 {Tcl_UpdateCmd procedure} {
     foreach i [after info] {
 	after cancel $i
     }
-    after 10; update; # On Mac make sure update won't take long
-    after 200 {set x x-done}
-    after 400 {set y y-done}
+    after 20; update; # On Mac make sure update won't take long
+    after 400 {set x x-done}
+    after 800 {set y y-done}
     after idle {set z z-done}
     set x before
     set y before
     set z before
-    after 300
+    after 600
     update
     list $x $y $z
 } {x-done before z-done}
@@ -212,6 +225,21 @@ test event-13.1 "vwait/signal" signal {
     } msg] $msg
 } {5 SIGALRM}
 
+test event-13.2 {after info invalid} -body {
+    after info not-a-valid-id
+} -returnCodes error -result {event "not-a-valid-id" doesn't exist}
+
+test event-13.3 {after info noexist} -body {
+    after info after#99999999
+} -returnCodes error -result {event "after#99999999" doesn't exist}
+
+test event-13.4 {after info usage} -body {
+    after info too-many args
+} -returnCodes error -result {wrong # args: should be "after info ?id?"}
+
+test event-13.5 {after cancel noexist} {
+    after cancel after#99999999
+} {}
 
 test event-14.1 {socket stream.server client address} {jim socket} {
     set s1 [socket stream.server 5001]

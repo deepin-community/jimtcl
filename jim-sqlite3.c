@@ -155,7 +155,7 @@ static int JimSqliteHandlerCommand(Jim_Interp *interp, int argc, Jim_Obj *const 
             Jim_WrongNumArgs(interp, 2, argv, "");
             return JIM_ERR;
         }
-        Jim_DeleteCommand(interp, Jim_String(argv[0]));
+        Jim_DeleteCommand(interp, argv[0]);
         return JIM_OK;
     }
     else if (option == OPT_QUERY) {
@@ -212,7 +212,7 @@ static int JimSqliteHandlerCommand(Jim_Interp *interp, int argc, Jim_Obj *const 
                         vObj = nullStrObj;
                         break;
                     case SQLITE_INTEGER:
-                        vObj = Jim_NewIntObj(interp, sqlite3_column_int(stmt, i));
+                        vObj = Jim_NewIntObj(interp, sqlite3_column_int64(stmt, i));
                         break;
                     case SQLITE_FLOAT:
                         vObj = Jim_NewDoubleObj(interp, sqlite3_column_double(stmt, i));
@@ -288,9 +288,7 @@ static int JimSqliteOpenCommand(Jim_Interp *interp, int argc, Jim_Obj *const *ar
 
 int Jim_sqlite3Init(Jim_Interp *interp)
 {
-    if (Jim_PackageProvide(interp, "sqlite3", "1.0", JIM_ERRMSG))
-        return JIM_ERR;
-
+    Jim_PackageProvideCheck(interp, "sqlite3");
     Jim_CreateCommand(interp, "sqlite3.open", JimSqliteOpenCommand, NULL, NULL);
     return JIM_OK;
 }

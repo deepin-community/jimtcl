@@ -1714,7 +1714,7 @@ static int DbObjCmd(Jim_Interp *interp, int objc,Jim_Obj *const*objv){
   ** Shutdown the database
   */
   case DB_CLOSE: {
-    Jim_DeleteCommand(interp, Jim_String(objv[0]));
+    Jim_DeleteCommand(interp, objv[0]);
     break;
   }
 
@@ -2821,10 +2821,8 @@ static int DbMain(Jim_Interp *interp, int objc, Jim_Obj *const*objv){
 ** used to open a new SQLite database.  See the DbMain() routine above
 ** for additional information.
 */
-EXTERN int Jim_sqlite3Init(Jim_Interp *interp){
-  Jim_CreateCommand(interp, "sqlite3", DbMain, 0, 0);
-  Jim_PackageProvide(interp, "sqlite3", PACKAGE_VERSION, 0);
+EXTERN int Jim_sqliteInit(Jim_Interp *interp){
+  Jim_PackageProvideCheck(interp, "sqlite");
   Jim_CreateCommand(interp, "sqlite", DbMain, 0, 0);
-  Jim_PackageProvide(interp, "sqlite", PACKAGE_VERSION, 0);
   return JIM_OK;
 }

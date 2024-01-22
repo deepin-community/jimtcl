@@ -16,7 +16,7 @@ Copyright: 2005 Salvatore Sanfilippo <antirez@invece.org>
            2009 David Brownell
 License: BSD-2-clause
 
-Files: autosetup/
+Files: autosetup/*
 Copyright: 2006-2011, WorkWare Systems
 License: BSD-2-clause
 
@@ -71,7 +71,7 @@ License: TCL
  permission to use and distribute the software in accordance with the
  terms specified in this license.
 
-Files: debian/
+Files: debian/*
 Copyright: 2011 Edgar Grimberg <edgar.grimberg@gmail.com>
            2011 Steve Bennett <steveb@workware.net.au>
            2011-2014 Didier Raboud <odyx@debian.org>
