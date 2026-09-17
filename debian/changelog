@@ -1,9 +1,3 @@
-jimtcl (0.82-5) unstable; urgency=medium
-
-  * Rebuild with LTO enabled (dpkg vendor feature optimize/lto).
-
- -- tunaichao <tunaichao@uniontech.com>  Fri, 11 Sep 2026 15:20:00 +0800
-
 jimtcl (0.82-4) unstable; urgency=medium
 
   * upload to unstable 
